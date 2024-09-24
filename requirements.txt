@@ -1,0 +1,11 @@
+dataclasses
+typing
+termcolor
+
+numpy
+matplotlib
+
+do_mpc  # actual mpc
+casadi  # sin, cos, ...
+
+shapely # ToDo: Shapely obstacles

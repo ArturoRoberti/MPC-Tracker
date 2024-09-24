@@ -1,6 +1,5 @@
 import sys
 import os
-import time
 
 import do_mpc
 from casadi import * # mainly sin, cos, SX
@@ -8,13 +7,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 from dataclasses import dataclass, field
 from termcolor import colored
+from typing import List, Dict, Tuple
 import shapely
 
 @dataclass
 class MPC_2DTracker:
     '''
     Inputs:
-     - r_robot (str): Radius of the robot
+    - r_robot (str): Radius of the robot
     - ts (float): Time step of the MPC
 
     Class for MPC tracking of a 2D robot with static or dynamic circular obstacles and a (possibly moving) goal position. Further, custom states (e.g. yaw angle) can also be set.
@@ -32,11 +32,16 @@ class MPC_2DTracker:
     r_robot: float = field()
     ts: float = field()
 
+    # TODO(0): There are TODOs all over the code which are not yet implemented
+
     # TODO: (MAYBE) add bools to check order of functions called (and if no e.g. states are added) (also check that after add_obstacle(), no more states can be added - add description that says weight have to be added for each distance after)
     # TODO: Add 'add_moving_reference' function (inputs: betroffener state (e.g. 'x' oder 'y'), r0, DGL) - in it, add warning if reference (and weight!) already set
     # TODO: Add checks for invalid lower bound/upper bound limits (e.g. lower bound > upper bound oder e.g. bei control lower und upper bound = 0 oder bei state lower bound = upper bound)
     # TODO: (MAYBE) Move from custom obstacle classes to shapely objects (https://shapely.readthedocs.io/en/stable/manual.html#polygons)
     # TODO: use 'set_nl_cons' instead of new states for obstacle constraints
+
+    # TODO(2): Add polygon obstacles (both static and rotating (around themselves and other points))
+    # TODO(2): Add polygon approximation as circle
     
     # Helper classes
     class obstacle:
@@ -48,17 +53,17 @@ class MPC_2DTracker:
             self.y = y_center
             self.r = r
 
-    class polyhedron_obstacle:
-        '''
-        Defines a static polyhedron obstacle with a numpy array. Each row represents the 3 coefficient A, B, C of a vertice's plane equation Ax + By + C = 0.
-        '''
-        def __init__(self, points: np.ndarray | tuple):
-            self.coefficients = points
+    # class polyhedron_obstacle:
+    #     '''
+    #     Defines a static polyhedron obstacle with a numpy array. Each row represents the 3 coefficient A, B, C of a vertice's plane equation Ax + By + C = 0.
+    #     '''
+    #     def __init__(self, points: np.ndarray | tuple):
+    #         self.coefficients = points
 
-        def points_to_coefficients(self, points: np.ndarray | tuple):
-            '''
-            Converts a numpy array of points to the coefficients of the corresponding planes.
-            '''
+    #     def points_to_coefficients(self, points: np.ndarray | tuple):
+    #         '''
+    #         Converts a numpy array of points to the coefficients of the corresponding planes.
+    #         '''
             
 
 
@@ -530,7 +535,7 @@ class MPC_2DTracker:
         self.simulator.x0 = np.array(self.x0)
         self.curr_x = self.simulator.make_step(np.zeros((len(self.controls), 1))).flatten() # Initial prediction
     
-    def next_step(self, x0: dict, pos_tol: float = 0.01, vel_tol:float = 0.01, angle_tol: float = 0.01, suppress_output: bool = True) -> (np.ndarray, np.ndarray): # or None
+    def next_step(self, x0: dict, pos_tol: float = 0.01, vel_tol:float = 0.01, angle_tol: float = 0.01, suppress_output: bool = True) -> Tuple[np.ndarray, np.ndarray]: # or None
         '''
         Calculates the next step of the MPC and returns the control input. This function can only be called after the model has been compiled (by setting its horizon length).
 
