@@ -11,10 +11,11 @@ curl -sSL https://install.python-poetry.org | python3 -
 
 Then run `poetry install` in the root repo directory. This creates a new virtual environment (or uses a currently running one) and installs the packages defined in `requirements.txt` to it. To access the virtual environment, running `poetry shell` may be necessary.
 
-Should you require importing new packages, install them to the virtual environment and add them to the package using (all commands from a shell running in the poetry virtual environment):
+Should you require importing new packages, install them to the virtual environment and add them to the package using:
 ```
+poetry shell
 pip install <package_name>
-pip freeze > requirements.txt
+(pip freeze | grep -v "MPC-Tracker")> requirements.txt
 poetry add $(cat requirements.txt)
 poetry install
 ```
