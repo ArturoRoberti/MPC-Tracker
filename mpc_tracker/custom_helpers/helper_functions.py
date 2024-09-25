@@ -1,8 +1,7 @@
 import random
 import numpy as np
-from custom_helpers.helper_classes import Circle
-# import matplotlib.pyplot as plt
 from typing import List
+from custom_helpers.helper_classes import *
 
 def smallest_circle(points: List[np.ndarray]) -> Circle:
     # Check input type and size
@@ -57,9 +56,7 @@ def smallest_circle(points: List[np.ndarray]) -> Circle:
         idx = random.randint(0,n-1)
         p = P[idx]
 
-        # Put the picked point at the end of P
-        # since it's more efficient than
-        # deleting from the middle of the vector
+        # Put the picked point at the end of P since it's more efficient than deleting from the middle of the vector
         P[idx], P[n-1] = P[n-1], P[idx]
         
         # Get the minimum enclosing circle without point p
@@ -77,43 +74,6 @@ def smallest_circle(points: List[np.ndarray]) -> Circle:
     # Randomly shuffle the points
     P = points.copy()
     random.shuffle(P)
+
     # Use Welzl's algorithm
     return _welzl(P, [], len(P))
-
-    # def plot_results(points, circle):
-    # # Plot the points
-    # x, y = zip(*points)
-    # plt.scatter(x, y, label='Points')
-
-    # # Plot the circle
-    # circle_plot = plt.Circle(circle.center, circle.radius, color='b', fill=False, label='Minimum Enclosing Circle')
-    # plt.gca().add_patch(circle_plot)
-
-    # # Set the aspect of the plot to be equal
-    # plt.gca().set_aspect('equal', adjustable='box')
-
-    # # Add labels and legend
-    # plt.xlabel('X')
-    # plt.ylabel('Y')
-    # plt.legend()
-    # plt.title('Minimum Enclosing Circle')
-
-    # # Show the plot
-    # plt.show()
-
-if __name__ == "__main__":
-    # # Generate 100 random points
-    # points = [(random.uniform(-10, 10), random.uniform(-10, 10)) for _ in range(100)]
-
-    # # points = [(0, 0), (4, 0), (2, 4), (2, 2)]
-
-    # # Find the minimum enclosing circle
-    # circle = smallest_circle(points)
-
-    # # Output the result
-    # print(f"Center: {circle.center}")
-    # print(f"Radius: {circle.radius}")
-
-    # # # Plot the results
-    # # plot_results(points, circle)
-    pass

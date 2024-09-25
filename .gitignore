@@ -1,7 +1,3 @@
-# Ignore Python build-related directories
-build/
-*.egg-info/
-
 # Ignore testing directories
 *test*/
 *trash*/
