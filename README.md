@@ -4,7 +4,7 @@ Python toolbox to ease the use of MPC for tracking a goal with the presence of o
 Currently (*this repo is still in its inception*), only *MPC_2DTracker* is implemented with an integrated simulator. To look at its implementation and some examples, see *mpc_tracker/Tracker_2D/MPC_2DTracker.py* resp. *mpc_tracker/examples/*. In future releases, the simulator will be separate and the *MPC_2DTracker* can be used in connection with other (real) systems.
 
 # Setup (for Linux)
-Be sure to install `poetry` to your system using
+Be sure to install `poetry` to your system using change
 ```
 curl -sSL https://install.python-poetry.org | python3 -
 ```
