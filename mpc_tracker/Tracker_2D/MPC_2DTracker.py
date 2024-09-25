@@ -5,6 +5,7 @@ import do_mpc
 from casadi import * # mainly sin, cos, SX
 import numpy as np
 import matplotlib.pyplot as plt
+import tkinter as tk
 from dataclasses import dataclass, field
 from termcolor import colored
 from typing import List, Dict, Tuple
@@ -624,7 +625,10 @@ class MPC_2DTracker:
             x0_dict = {}
             # print("Current x: " + str(self.curr_x))
             x0_dict = {'x': self.curr_x[self.indices['x']], 'y': self.curr_x[self.indices['y']], 'vx': self.curr_x[self.indices['vx']], 'vy': self.curr_x[self.indices['vy']]}
+            # t0 = time.time()
             x0u0 = self.next_step(x0_dict, pos_tol = pos_tol, vel_tol = vel_tol, angle_tol = angle_tol, suppress_output = suppress_mpc_output)
+            # t1 = time.time()
+            # timevec2.append(t1 - t0)
             if x0u0 is None:
                 break
             else:
@@ -652,8 +656,17 @@ class MPC_2DTracker:
                 ax.set_aspect('equal')
 
                 if max_size:
+                    # Get the current figure manager
                     figManager = plt.get_current_fig_manager()
-                    figManager.window.showMaximized()
+                    
+                    # Retrieve screen width and height using tkinter
+                    root = tk.Tk()
+                    root.withdraw()
+                    screen_width = root.winfo_screenwidth()
+                    screen_height = root.winfo_screenheight()
+
+                    # Resize the window to the screen size
+                    figManager.window.geometry(f"{screen_width}x{screen_height}+0+0")  # Set window size to screen size
 
                 # Goal position
                 if self.indices['goal_x'] is not None and self.indices['goal_y'] is not None:
@@ -674,8 +687,8 @@ class MPC_2DTracker:
                 moving_plot = [ax.plot([], [], markersize=5)[0] for _ in range(len(self.sat_radii)+add_plots)]
                 
                 # Animate map: robot position over time, satellite (as circle) positions over time # TODO: Modify when adding goal posiiton over time
-                time = np.arange(0, len(self.simulator.data['_x', 'x'])*self.ts, self.ts)
-                for i in range(len(time)):
+                timevec = np.arange(0, len(self.simulator.data['_x', 'x'])*self.ts, self.ts)
+                for i in range(len(timevec)):
                     ax.plot(self.simulator.data['_x', 'x'][i], self.simulator.data['_x', 'y'][i],  'b+', markersize=5)
                     x_robot = self.simulator.data['_x', 'x'][i] + self.r_robot*np.cos(theta)
                     y_robot = self.simulator.data['_x', 'y'][i] + self.r_robot*np.sin(theta)
