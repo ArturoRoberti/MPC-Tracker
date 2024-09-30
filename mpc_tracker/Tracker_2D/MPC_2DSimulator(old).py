@@ -9,7 +9,6 @@ import matplotlib.pyplot as plt
 import tkinter as tk
 
 from mpc_tracker.Tracker_2D.MPC_2DTracker import MPC_2DTracker
-from mpc_tracker.custom_helpers.helper_classes import Circle, Polygon
 from casadi import SX
 
 @dataclass
@@ -45,7 +44,7 @@ class MPC_2DSimulator:
     max_size: bool = False
     suppress_mpc_output: bool = True
     output_time: bool = False
-    deltatimevec = [] # TODO: Make it so that this cannot be input
+    average_timevec = [] # TODO: Make it so that this cannot be input
 
     def simulate(self) -> np.ndarray:
         def _plot_map():
@@ -83,22 +82,15 @@ class MPC_2DSimulator:
 
             # Static obstacles
             theta = np.linspace(0, 2*np.pi, 100)
-            for obs in self.tracker.static_obstacles:
-                # TODO: Differentiate between circles and poylgons
-                if isinstance(obs, Circle):
-                    x_obs_plot = obs.center[0] + obs.radius*np.cos(theta)
-                    y_obs_plot = obs.center[1] + obs.radius*np.sin(theta)
-                    ax_map.plot(x_obs_plot, y_obs_plot, 'k')
-                elif isinstance(obs, Polygon):
-                    x_obs_plot = [point[0] for point in (obs.points + obs.points[0:1])]
-                    y_obs_plot = [point[1] for point in (obs.points + obs.points[0:1])]
-                    # ax_map.fill(x_obs_plot, y_obs_plot, 'k')
-                    ax_map.plot(x_obs_plot, y_obs_plot, 'k')
+            for obs in self.tracker.obstacles:
+                x_obs_plot = obs.x + obs.r*np.cos(theta)
+                y_obs_plot = obs.y + obs.r*np.sin(theta)
+                ax_map.plot(x_obs_plot, y_obs_plot, 'k')
 
             moving_plot = [ax_map.plot([], [], markersize=5)[0] for _ in range(len(self.tracker.sat_radii)+add_plots)]
             
             # Animate map: robot position over time, satellite (as circle) positions over time # TODO: Modify when adding goal posiiton over time
-            timevec = np.arange(0, len(self.tracker.simulator.data['_x', 'x']), 1)
+            timevec = np.arange(0, len(self.tracker.simulator.data['_x', 'x'])*self.tracker.ts, self.tracker.ts)
             for i in range(len(timevec)):
                 ax_map.plot(self.tracker.simulator.data['_x', 'x'][i], self.tracker.simulator.data['_x', 'y'][i],  'b+', markersize=5)
                 x_robot = self.tracker.simulator.data['_x', 'x'][i] + self.tracker.r_robot*np.cos(theta)
@@ -171,18 +163,9 @@ class MPC_2DSimulator:
             if self.output_time:
                 t0 = time.time()
             x0u0 = self.tracker.next_step(x0_dict, pos_tol = pos_tol, vel_tol = vel_tol, angle_tol = angle_tol, suppress_output = self.suppress_mpc_output)
-            # if x0u0 is not None:
-            #     x, y = x0u0[0][self.tracker.indices['x']], x0u0[0][self.tracker.indices['y']]
-                # print(colored(f"Step {i+1}: x = {x}, y = {y}", 'green'))
-                # nlc = -max(17.2 - (1*x + 1*y),max(5.2 - (-1*x + 1*y),max(-14.8 - (-1*x + -1*y),-3 - (1*x + -1*y))))
-                # print("Current last nonlinear constraint:", nlc)
-                # if nlc > 0:
-                #     print(colored("WARNING: Nonlinear constraint is positive", 'red'))
-                # -fmax(17.2 - (1*x + 1*y),fmax(5.2 - (-1*x + 1*y),fmax(-14.8 - (-1*x + -1*y),-3 - (1*x + -1*y))))
             if self.output_time:
                 t1 = time.time()
-                self.deltatimevec.append(t1 - t0)
-                # print("Time for MPC step " + str(i+1) + ": " + str(t1 - t0) + " s")
+                self.average_timevec.append(t1 - t0)
             if x0u0 is None:
                 break
 
@@ -200,10 +183,7 @@ class MPC_2DSimulator:
             plt.show()
 
         if self.output_time:
-            print("Average time per MPC step: \t\t\t" + str(np.mean(self.deltatimevec)))
-            print("Standard deviation of time per MPC step: \t" + str(np.std(self.deltatimevec)))
-            print("Maximal time per MPC step: \t\t\t" + str(np.max(self.deltatimevec)))
-            print("Minimal time per MPC step: \t\t\t" + str(np.min(self.deltatimevec)))
+            print("Average time per MPC step: " + str(np.mean(self.average_timevec)))
 
         result_statedict = {}
         for key in self.tracker.indices.keys():
@@ -258,14 +238,10 @@ if __name__ == '__main__':
     # model.add_state('der_ds', f'2*((x - {x_goal})*vx + (y - {y_goal})*vy)', x0 = x_goal, upper_bound=x_goal + 0.01, weight=ds_weight)
     model.add_control('Fx', lower_bound=-force_bound, upper_bound=force_bound, weight=force_weight)
     model.add_control('Fy', lower_bound=-force_bound, upper_bound=force_bound, weight=force_weight)
-    model.add_static_obstacle(Circle(np.array([9, 9]), 1))
-    model.add_static_obstacle(Circle(np.array([4, 3.6]), 1))
-    model.add_static_obstacle(Circle(np.array([1.5, 3]), 1))
-    model.add_static_obstacle(Circle(np.array([4, 2.1]), 1))
-    # model.add_static_obstacle(Polygon([[7, 10], [6, 11], [5, 10], [6, 9]]))
-    # model.add_static_obstacle(Polygon([[7, 10], [6, 11], [5, 10], [6, 9]]))
-    model.add_static_obstacle(Polygon([[6 + 1.5*np.cos(theta), 10 + 1.5*np.sin(theta)] for theta in np.linspace(0, 2 * np.pi, 7)[:-1]]))
-    model.add_static_obstacle(Polygon([[0, 1], [1, 0], [2, 1], [1, 2]]))
+    model.add_static_obstacle(9, 9, 1)
+    model.add_static_obstacle(4, 3.6, 1)
+    model.add_static_obstacle(1.5, 3, 1)
+    model.add_static_obstacle(4, 2.1, 1)
     model.add_satellite_obstacle(1, 1, 1, 2, 0.1, 0)
     model.add_satellite_obstacle(0, 0, goal_satellite_radius, goal_satellite_orbitradius, omega_goal_satellite_orbit, theta0_orbit=psi0_goal_satellite_orbit)
     # model.add_satellite_goal(0, 0, goal_satellite_orbitradius + goal_satellite_radius + 4*r_robot*1.5, omega_goal_satellite_orbit, psi0_orbit=psi0_goal_satellite_orbit, w_angle=angle_weight, wN_angle=angle_end_weight)
@@ -274,5 +250,5 @@ if __name__ == '__main__':
     model.add_satellite_goal(0, 0, goal_satellite_orbitradius + goal_satellite_radius + 4*r_robot*1.5, omega_goal_satellite_orbit, psi0_orbit=psi0_goal_satellite_orbit, w_pos=position_weight, wN_pos=position_end_weight, w_vel=velocity_weight, wN_vel=velocity_weight, w_angle=angle_weight, wN_angle=angle_end_weight)
     model.set_horizon(horizon_length=5)
 
-    simulator = MPC_2DSimulator(model, max_steps=500, plot_data=True, plot_map=True, time_factor=10, max_size=True, output_time=True)
+    simulator = MPC_2DSimulator(model, max_steps=500, plot_data=False, plot_map=True, time_factor=10, max_size=True, output_time=True)
     data = simulator.simulate()

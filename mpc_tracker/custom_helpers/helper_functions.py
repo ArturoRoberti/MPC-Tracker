@@ -1,7 +1,7 @@
 import random
 import numpy as np
 from typing import List
-from custom_helpers.helper_classes import *
+from mpc_tracker.custom_helpers.helper_classes import *
 
 def smallest_circle(points: List[np.ndarray]) -> Circle:
     # Check input type and size

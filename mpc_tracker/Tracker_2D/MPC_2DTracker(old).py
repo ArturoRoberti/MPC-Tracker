@@ -2,8 +2,7 @@ import sys
 import os
 
 import do_mpc
-from casadi import * # mainly sin, cos, SX, fmin, fmax
-# from casadi import fmin, sin, cos, SX
+from casadi import * # mainly sin, cos, SX
 import numpy as np
 import matplotlib.pyplot as plt
 import tkinter as tk
@@ -12,11 +11,6 @@ from termcolor import colored
 from typing import List, Dict, Tuple
 import shapely
 
-from mpc_tracker.custom_helpers.helper_classes import Circle, Polygon
-from mpc_tracker.custom_helpers.helper_functions import smallest_circle
-
-# import casadi
-# casadi.fmin
 @dataclass
 class MPC_2DTracker:
     '''
@@ -53,21 +47,17 @@ class MPC_2DTracker:
     # TODO(2): Add polygon approximation as circle
     # TODO(2): Replace "obstacle" class with circle helper class and add polygon helper class
     # TODO(2): Add check for equally named states/inputs (/states=input)
-    # TODO(2): Instead of adding x_satellite, y_satellite add single state phi_satellite
-    # TODO(2): Add checks to see that weights are positive
-    # TODO(2): Differentiate between static circles and Polygons in "add_static_obstacle" (and add "add_satellite_obstacle")
-    # TODO(2): Add general "add_moving_obstacle" function (eqns of center of obstacle and rotation of obstacle around point on obstacle)
-    # TODO(2): Edit variables to be internal (Add "_" before) and non-inputtable. Initialize them in __post_init__ (e.g. self._states = []) instead
-
-    # # Helper classes
-    # class obstacle:
-    #     '''
-    #     Defines a static circular obstacle with center (x_center, y_center) and radius r.
-    #     '''
-    #     def __init__(self, x_center, y_center, r):
-    #         self.x = x_center
-    #         self.y = y_center
-    #         self.r = r
+    # TODO(2): Add check for equally named states/inputs (/states=input)
+    
+    # Helper classes
+    class obstacle:
+        '''
+        Defines a static circular obstacle with center (x_center, y_center) and radius r.
+        '''
+        def __init__(self, x_center, y_center, r):
+            self.x = x_center
+            self.y = y_center
+            self.r = r
 
     # class polyhedron_obstacle:
     #     '''
@@ -126,9 +116,9 @@ class MPC_2DTracker:
 
     # functions_called = {'add_first': False, 'add_second': False, 'set_param': False} # (Maybe TODO)
 
-    _states = []             # List of all states
+    states = []             # List of all states
     states_bounds = []      # List of all state bounds
-    nonlinear_bounds = []   # List of all complex state bounds (e.g. for obstacles)
+    complex_bounds = {}     # List of all complex state bounds (e.g. for obstacles)
     EoM_str = []            # List of all equations of motion
     x0 = []                 # List of all initial values of the states
     reference = []          # List of all constant reference values of the states
@@ -141,7 +131,7 @@ class MPC_2DTracker:
     controls_bounds = []    # List of all control bounds
     R_diag = []             # List of all weights on controls themselves (diagonal cost matrix elements)
 
-    static_obstacles = []   # List of all static obstacles
+    obstacles = []          # List of all obstacles
     sat_radii = []          # List of all radii of satellite obstacles - used for plotting
     do_not_plot_ind = []    # List of all indices of states which should not be plotted (obstacle states, goal state)
 
@@ -154,31 +144,6 @@ class MPC_2DTracker:
 
     # During runtime/simulation
     curr_x = None           # Current states (list) of the robot, using during runtime/simulation
-
-    def __post_init__(self):
-        # Reset all mutable variables
-        self._states = []
-        self.states_bounds = []
-        self.nonlinear_bounds = []
-        self.EoM_str = []
-        self.x0 = []
-        self.reference = []
-        self.Q_diag = []
-        self.Q_off = {}
-        self.QN_diag = []
-        self.QN_off = {}
-
-        self.controls = []
-        self.controls_bounds = []
-        self.R_diag = []
-
-        self.static_obstacles = []
-        self.sat_radii = []
-        self.do_not_plot_ind = []
-
-        self.moving_goal = [False, False]
-        self.indices = {'x': None, 'y': None, 'psi': None, 'vx': None, 'vy': None, 'dpsi': None, 'goal_x': None, 'goal_y': None, 'goal_psi': None, 'goal_vx': None, 'goal_vy': None}
-
 
     def add_state(self, name: str, EoM: str, x0: float = 0, reference: float = 0, weight: float = 0, weight_N: float = 0, lower_bound: float = None, upper_bound: float = None):
         '''
@@ -200,7 +165,7 @@ class MPC_2DTracker:
             return
         
         state = self.model.set_variable(var_type='_x', var_name=name, shape=(1, 1))
-        self._states.append(state)
+        self.states.append(state)
         self.EoM_str.append(EoM)
         self.x0.append(x0)
         self.reference.append(reference)
@@ -209,7 +174,7 @@ class MPC_2DTracker:
         self.states_bounds.append([lower_bound, upper_bound])
 
         if name == 'x' or name == 'y' or name == 'vx' or name == 'vy' or name == 'psi' or name == 'dpsi':
-            self.indices[name] = len(self._states) - 1
+            self.indices[name] = len(self.states) - 1
 
         globals()[name] = state
 
@@ -234,7 +199,7 @@ class MPC_2DTracker:
 
         globals()[name] = control
 
-    def add_static_obstacle(self, obstacle: Circle | Polygon, w: float = 0, wN: float = 0, simplify_Polygon: bool = False):
+    def add_static_obstacle(self, x_center: float, y_center: float, r: float, w: float = 0, wN: float = 0):
         '''
         Adds a static circular obstacle to the current MPC controller. Can not be called after 'add_satellite_obstacle()' or later.
 
@@ -244,51 +209,13 @@ class MPC_2DTracker:
             - r (float):            Radius of the obstacle
             - w (float):            (OPTIONAL - default: 0) Weight of the distance to the obstacle in the cost function
             - wN (float):           (OPTIONAL - default: 0) Terminal weight of the distance to the obstacle in the cost function
-                                    Should no weights be added, then the obstacle will not be considered in the cost function and rather as a bound on the states.
-                                    This is computationally more efficient, but may lead to close calls with the obstacles.
         '''
-        # Helper function
-        def _circle_obstacle(c: Circle):
-            self.static_obstacles.append(c)
-            if w == 0 and wN == 0:
-                self.nonlinear_bounds.append(f"(({c.radius} + {self.r_robot})*(1 + {self.ts}))**2 - (x - {c.center[0]})**2 - (y - {c.center[1]})**2") # Safety margin of 'ts' chosen somewhat arbitrarily
-            else:
-                self.add_state(f'static_sqd{len(self.static_obstacles)}', f'2*(x-{c.center[0]})*vx + 2*(y-{c.center[1]})*vy', weight = w, weight_N = wN, x0 = (self.x0[self.indices['x']] - c.center[0])**2 + (self.x0[self.indices['y']] - c.center[1])**2, lower_bound = ((c.radius + self.r_robot)*(1 + self.ts))**2) # Safety margin of 'ts' chosen somewhat arbitrarily
-                self.do_not_plot_ind.append(len(self._states) - 1)
 
-        # Polygon obstacle (TODO)
-        if isinstance(obstacle, Polygon):
-            if simplify_Polygon:
-                _circle_obstacle(smallest_circle(obstacle.points))
-            else:
-                if not(w == 0 and wN == 0): # TODO
-                    raise NotImplementedError("ERROR in 'add_static_obstacle()': Weights for polygon obstacles are not yet implemented. Please set 'simplify_Polygon' to 'True' or set 'w' and 'wN' to 0.")
-                else:
-                    self.static_obstacles.append(obstacle)
-                    nl_constraint_str = ''
-                    for coeffs in obstacle._set_equations[:-1]:
-                        nl_constraint_str += f'fmin({coeffs[2] + (self.r_robot*np.sqrt(coeffs[0]**2 + coeffs[1]**2))*(2 + 0*self.ts)} - ({coeffs[0]}*x + {coeffs[1]}*y),'
-                        # nl_constraint_str += f'fmin({coeffs[2]} - ({coeffs[0]}*x + {coeffs[1]}*y),'
-                    # nl_constraint_str += '0)' + ')'*len(obstacle._set_equations)
-                    last_coeffs = obstacle._set_equations[-1]
-                    # print("Last coeffs:", np.around(last_coeffs[:-1], 2))
-                    nl_constraint_str += f"{last_coeffs[2] + (self.r_robot*np.sqrt(last_coeffs[0]**2 + last_coeffs[1]**2))*(2 + 0*self.ts)} - ({last_coeffs[0]}*x + {last_coeffs[1]}*y)" + ')'*(len(obstacle._set_equations) - 1)
-                    # nl_constraint_str += f"{last_coeffs[2]} - ({last_coeffs[0]}*x + {last_coeffs[1]}*y)" + ')'*(len(obstacle._set_equations) - 1)
-                    self.nonlinear_bounds.append(nl_constraint_str)
-                    # print(nl_constraint_str)
-        
-        elif isinstance(obstacle, Circle):
-            if simplify_Polygon:
-                print("WARNING in 'add_static_obstacle()': Simplification of polygons is not applicable for circles - ignoring...")
-            # self.static_obstacles.append(obstacle)
-            # if w == 0 and wN == 0:
-            #     self.nonlinear_bounds.append(f"(({obstacle.radius} + {self.r_robot})*(1 + {self.ts}))**2 - (x - {obstacle.center[0]})**2 - (y - {obstacle.center[1]})**2") # Safety margin of 'ts' chosen somewhat arbitrarily
-            # else:
-            #     self.add_state(f'static_sqd{len(self.static_obstacles)}', f'2*(x-{obstacle.center[0]})*vx + 2*(y-{obstacle.center[1]})*vy', weight = w, weight_N = wN, x0 = (self.x0[self.indices['x']] - obstacle.center[0])**2 + (self.x0[self.indices['y']] - obstacle.center[1])**2, lower_bound = ((obstacle.radius + self.r_robot)*(1 + self.ts))**2) # Safety margin of 'ts' chosen somewhat arbitrarily
-            #     self.do_not_plot_ind.append(len(self._states) - 1)
-            _circle_obstacle(obstacle)
-        else:
-            raise AssertionError(f"ERROR in 'add_static_obstacle()': Obstacle must be of type 'Circle' or 'Polygon', but got type '{type(obstacle).__name__}' instead")
+        self.obstacles.append(self.obstacle(x_center, y_center, r))
+        self.add_state(f'static_sqd{len(self.obstacles)}', f'2*(x-{x_center})*vx + 2*(y-{y_center})*vy', weight = w, weight_N = wN, x0 = (self.x0[self.indices['x']] - x_center)**2 + (self.x0[self.indices['y']] - y_center)**2, lower_bound = ((r + self.r_robot)*(1 + self.ts))**2) # Safety margin of 'ts' chosen somewhat arbitrarily
+        self.do_not_plot_ind.append(len(self.states) - 1)
+
+        # self.complex_bounds[]
 
     def add_satellite_obstacle(self, x_center: float, y_center: float, r_satellite: float, r_orbit: float, omega_orbit: float, theta0_orbit: float, w: float = 0, wN: float = 0):
         '''f
@@ -323,7 +250,7 @@ class MPC_2DTracker:
         vd = f'2*(vx - {sat_vx})*(x - sat_x{n_theta}) + 2*(vy - {sat_vy})*(y - sat_y{n_theta})'
         d_x0 = (self.x0[self.indices['x']] - sat_center_x0)**2 + (self.x0[self.indices['y']] - sat_center_y0)**2
         self.add_state(f'sat_sqd{n_theta}', vd, weight = w, weight_N = wN, x0 = d_x0, lower_bound = ((r_satellite + self.r_robot)*(1 + self.ts))**2) # Safety margin of 'ts' chosen somewhat arbitrarily
-        self.do_not_plot_ind.extend([len(self._states) - 1, len(self._states) - 2, len(self._states) - 3, len(self._states) - 4])
+        self.do_not_plot_ind.extend([len(self.states) - 1, len(self.states) - 2, len(self.states) - 3, len(self.states) - 4])
 
     def set_difference_weight(self, state_1: str, state_2: str, weight: float, weight_N: float): # TODO: Extend to inputs
         '''
@@ -455,7 +382,7 @@ class MPC_2DTracker:
 
 
         self.add_state('goal_psi', str(omega_orbit), x0 = psi0_orbit) # TODO: Check if goal is not always "standing on" satellite, i.e. add constant angle here (or idk what to do)
-        self.indices['goal_psi'] = len(self._states) - 1
+        self.indices['goal_psi'] = len(self.states) - 1
         
         if self.indices['psi'] is None:
             if psi0_orbit != 0:
@@ -470,7 +397,7 @@ class MPC_2DTracker:
         # goal_vx = f'-{r_orbit}*{omega_orbit}*sin(goal_psi)'
         # goal_center_x0 = x_center + r_orbit*np.cos(psi0_orbit)
         # self.add_state('goal_x', goal_vx, x0 = goal_center_x0)
-        # self.indices['goal_x'] = len(self._states) - 1
+        # self.indices['goal_x'] = len(self.states) - 1
         # self.set_difference_weight('x', 'goal_x', weight = w_pos, weight_N = wN_pos)
 
         # # TODO: Instead of this, one has to add a state 'goal_vx' and 'goal_vy' and set the difference weight between 'vx' and 'goal_vx' and between 'vy' and 'goal_vy'
@@ -483,7 +410,7 @@ class MPC_2DTracker:
         # goal_vy = f'{r_orbit}*{omega_orbit}*cos(goal_psi)'
         # goal_center_y0 = y_center + r_orbit*np.sin(psi0_orbit)
         # self.add_state('goal_y', goal_vy, x0 = goal_center_y0)
-        # self.indices['goal_y'] = len(self._states) - 1
+        # self.indices['goal_y'] = len(self.states) - 1
         # self.set_difference_weight('y', 'goal_y', weight = w_pos, weight_N = wN_pos)
 
         # # TODO: Instead of this, one has to add a state 'goal_vx' and 'goal_vy' and set the difference weight between 'vx' and 'goal_vx' and between 'vy' and 'goal_vy'
@@ -496,20 +423,20 @@ class MPC_2DTracker:
         vy0 = v0*np.cos(psi0_orbit)
 
         self.add_state('goal_x', 'goal_vx', x0 = x_center + r_orbit*np.cos(psi0_orbit))
-        self.indices['goal_x'] = len(self._states) - 1
+        self.indices['goal_x'] = len(self.states) - 1
         self.set_difference_weight('x', 'goal_x', weight = w_pos, weight_N = wN_pos)
         self.add_state('goal_vx', f'-{r_orbit}*{omega_orbit**2}*cos(goal_psi)', x0 = vx0)
-        self.indices['goal_vx'] = len(self._states) - 1
+        self.indices['goal_vx'] = len(self.states) - 1
         self.set_difference_weight('vx', 'goal_vx', weight = w_vel, weight_N = wN_vel)
 
         self.add_state('goal_y', 'goal_vy', x0 = y_center + r_orbit*np.sin(psi0_orbit))
-        self.indices['goal_y'] = len(self._states) - 1
+        self.indices['goal_y'] = len(self.states) - 1
         self.set_difference_weight('y', 'goal_y', weight = w_pos, weight_N = wN_pos)
         self.add_state('goal_vy', f'-{r_orbit}*{omega_orbit**2}*sin(goal_psi)', x0 = vy0)
-        self.indices['goal_vy'] = len(self._states) - 1
+        self.indices['goal_vy'] = len(self.states) - 1
         self.set_difference_weight('vy', 'goal_vy', weight = w_vel, weight_N = wN_vel)
 
-        self.do_not_plot_ind.extend([len(self._states) - 1, len(self._states) - 2, len(self._states) - 3, len(self._states) - 4, len(self._states) - 5])
+        self.do_not_plot_ind.extend([len(self.states) - 1, len(self.states) - 2, len(self.states) - 3, len(self.states) - 4, len(self.states) - 5])
 
     def set_horizon(self, horizon_length: int):
         '''
@@ -528,10 +455,10 @@ class MPC_2DTracker:
             Finishes the first part of MPC model by setting the equations of motion and calling an internal setup() function.
             '''
 
-            if len(self.static_obstacles) > 0 and not ('x' in self.model.x.keys() and 'y' in self.model.x.keys() and 'vx' in self.model.x.keys() and 'vy' in self.model.x.keys()):
+            if len(self.obstacles) > 0 and not ('x' in self.model.x.keys() and 'y' in self.model.x.keys() and 'vx' in self.model.x.keys() and 'vy' in self.model.x.keys()):
                 raise AssertionError("ERROR in 'end_setup()': 'x', 'y', 'vx' and 'vy' must be set as states if obstacles are present")
 
-            for i in range(len(self._states)):
+            for i in range(len(self.states)):
                 try:
                     # print("x_goal:", x_goal)
                     # print("m:", m)
@@ -561,15 +488,15 @@ class MPC_2DTracker:
             QN = np.diag(self.QN_diag)
 
             if len(self.Q_off) == 0 and len(self.QN_off) == 0:
-                n_states = len(self._states)
+                n_states = len(self.states)
                 Q_off = np.zeros((n_states, n_states))
                 QN_off = np.zeros((n_states, n_states))
             elif len(self.Q_off) == 0 or len(self.QN_off) == 0:
                 raise ValueError("ERROR in 'end_setup()': Either both Q_off and QN_off must be empty or both must be dicts of dicts - should not happen")
             else:
-                Q_off = np.zeros((len(self._states), len(self._states)))
-                QN_off = np.zeros((len(self._states), len(self._states)))
-                for i in range(len(self._states)):
+                Q_off = np.zeros((len(self.states), len(self.states)))
+                QN_off = np.zeros((len(self.states), len(self.states)))
+                for i in range(len(self.states)):
                     if i in self.Q_off:
                         for j in self.Q_off[i]:
                             Q_off[i, j] = self.Q_off[i][j]
@@ -579,7 +506,7 @@ class MPC_2DTracker:
             
             def weighted_norm(vec: np.ndarray, mat: np.ndarray):
                 return np.dot(vec.T, np.dot(mat, vec)).item()
-            st = np.array(self._states).reshape(-1, 1)
+            st = np.array(self.states).reshape(-1, 1)
             ct = np.array(self.controls).reshape(-1, 1)
             ref = np.array(self.reference).reshape(-1, 1)
             lterm = weighted_norm(st - ref, Q) + weighted_norm(st, Q_off) + weighted_norm(ct, R)
@@ -593,11 +520,6 @@ class MPC_2DTracker:
                     self.mpc.bounds['lower', '_x', xkeys[bound_ind]] = bound[0]
                 if bound[1] is not None:
                     self.mpc.bounds['upper', '_x', xkeys[bound_ind]] = bound[1]
-            # if len(self.nonlinear_bounds) > 0:
-            for ind, nonlinear_bound in enumerate(self.nonlinear_bounds):
-                # print(f"Setting nonlinear constraint {ind}: {nonlinear_bound}")
-                self.mpc.set_nl_cons(f"nonlinear_constraint_{ind}", eval(nonlinear_bound), ub=0)
-                # self.mpc.set_nl_cons("test", eval('fmin(0, x)'), ub=0)
 
             if 'default' in self.model.u.keys():
                 ukeys = [i for i in self.model.u.keys() if i != 'default']
@@ -768,16 +690,10 @@ class MPC_2DTracker:
 
                 # Static obstacles
                 theta = np.linspace(0, 2*np.pi, 100)
-                for obs in self.static_obstacles:
-                    # TODO: Differentiate between circles and poylgons
-                    if isinstance(obs, Circle):
-                        x_obs_plot = obs.center[0] + obs.radius*np.cos(theta)
-                        y_obs_plot = obs.center[1] + obs.radius*np.sin(theta)
-                        ax.plot(x_obs_plot, y_obs_plot, 'k')
-                    elif isinstance(obs, Polygon):
-                        x_obs_plot = [point[0] for point in (obs.points + obs.points[0:1])]
-                        y_obs_plot = [point[1] for point in (obs.points + obs.points[0:1])]
-                        ax.plot(x_obs_plot, y_obs_plot, 'k')
+                for obs in self.obstacles:
+                    x_obs_plot = obs.x + obs.r*np.cos(theta)
+                    y_obs_plot = obs.y + obs.r*np.sin(theta)
+                    ax.plot(x_obs_plot, y_obs_plot, 'k')
 
                 moving_plot = [ax.plot([], [], markersize=5)[0] for _ in range(len(self.sat_radii)+add_plots)]
                 
@@ -826,10 +742,10 @@ if __name__ == '__main__':
     r_robot = 0.1
     goal_satellite_orbitradius = 9
     goal_satellite_radius = 3
-    omega_goal_satellite_orbit = 0.04
+    omega_goal_satellite_orbit = 0.05
     psi0_goal_satellite_orbit = 0
 
-    param = {'m': 1}
+    param = {} # {'m': 1}
 
     model = MPC_2DTracker(r_robot=r_robot, ts=0.1, parameters=param)
     model.add_state('x', 'vx', reference=x_goal, weight_N=position_end_weight)# , lower_bound=-2, upper_bound=12)
@@ -844,11 +760,10 @@ if __name__ == '__main__':
     # model.add_state('der_ds', f'2*((x - {x_goal})*vx + (y - {y_goal})*vy)', x0 = x_goal, upper_bound=x_goal + 0.01, weight=ds_weight)
     model.add_control('Fx', lower_bound=-force_bound, upper_bound=force_bound, weight=force_weight)
     model.add_control('Fy', lower_bound=-force_bound, upper_bound=force_bound, weight=force_weight)
-    model.add_static_obstacle(Circle(np.array([9, 9]), 1))
-    model.add_static_obstacle(Circle(np.array([4, 3.6]), 1))
-    model.add_static_obstacle(Circle(np.array([1.5, 3]), 1))
-    model.add_static_obstacle(Circle(np.array([4, 2.1]), 1))
-    model.add_static_obstacle(Polygon([[7, 10], [6, 11], [5, 10], [6, 9]]))
+    model.add_static_obstacle(9, 9, 1)
+    model.add_static_obstacle(4, 3.6, 1)
+    model.add_static_obstacle(1.5, 3, 1)
+    model.add_static_obstacle(4, 2.1, 1)
     model.add_satellite_obstacle(1, 1, 1, 2, 0.1, 0)
     model.add_satellite_obstacle(0, 0, goal_satellite_radius, goal_satellite_orbitradius, omega_goal_satellite_orbit, theta0_orbit=psi0_goal_satellite_orbit)
     # model.add_satellite_goal(0, 0, goal_satellite_orbitradius + goal_satellite_radius + 4*r_robot*1.5, omega_goal_satellite_orbit, psi0_orbit=psi0_goal_satellite_orbit, w_angle=angle_weight, wN_angle=angle_end_weight)
