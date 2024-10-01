@@ -2,14 +2,13 @@ import sys
 import os
 
 import do_mpc
-from casadi import * # mainly sin, cos, SX, fmin, fmax
-# from casadi import fmin, sin, cos, SX
+from casadi import SX, MX, sin, cos, fmin, fmax
 import numpy as np
 import matplotlib.pyplot as plt
 import tkinter as tk
 from dataclasses import dataclass, field
 from termcolor import colored
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 import shapely
 
 from mpc_tracker.custom_helpers.helper_classes import Circle, Polygon
@@ -36,11 +35,6 @@ class MPC_2DTracker:
 
     '''
 
-    # Necessary initialization inputs
-    r_robot: float = field()
-    ts: float = field()
-    parameters: dict = field()
-
     # TODO(0): There are TODOs all over the code which are not yet implemented
 
     # TODO: (MAYBE) add bools to check order of functions called (and if no e.g. states are added) (also check that after add_obstacle(), no more states can be added - add description that says weight have to be added for each distance after)
@@ -58,29 +52,7 @@ class MPC_2DTracker:
     # TODO(2): Differentiate between static circles and Polygons in "add_static_obstacle" (and add "add_satellite_obstacle")
     # TODO(2): Add general "add_moving_obstacle" function (eqns of center of obstacle and rotation of obstacle around point on obstacle)
     # TODO(2): Edit variables to be internal (Add "_" before) and non-inputtable. Initialize them in __post_init__ (e.g. self._states = []) instead
-
-    # # Helper classes
-    # class obstacle:
-    #     '''
-    #     Defines a static circular obstacle with center (x_center, y_center) and radius r.
-    #     '''
-    #     def __init__(self, x_center, y_center, r):
-    #         self.x = x_center
-    #         self.y = y_center
-    #         self.r = r
-
-    # class polyhedron_obstacle:
-    #     '''
-    #     Defines a static polyhedron obstacle with a numpy array. Each row represents the 3 coefficient A, B, C of a vertice's plane equation Ax + By + C = 0.
-    #     '''
-    #     def __init__(self, points: np.ndarray | tuple):
-    #         self.coefficients = points
-
-    #     def points_to_coefficients(self, points: np.ndarray | tuple):
-    #         '''
-    #         Converts a numpy array of points to the coefficients of the corresponding planes.
-    #         '''
-            
+    # TODO(2): Update docstring
 
 
     # Helper functions
@@ -88,7 +60,7 @@ class MPC_2DTracker:
         '''
         Finds the index of a state in the MPC model. Raises an error if that state does not exist.
         '''
-        for name_ind, name in enumerate(self.model.x.keys()):
+        for name_ind, name in enumerate(self._model.x.keys()):
             if state_name == name:
                 return name_ind
         raise ValueError(f"ERROR in 'find_state_index()': State '{name}' not found")
@@ -106,79 +78,66 @@ class MPC_2DTracker:
         '''
 
         # Static goal
-        if not (self.moving_goal[0] or self.moving_goal[1]):
-            if np.linalg.norm(np.array([self.curr_x[self.indices['x']]-self.reference[self.indices['x']], self.curr_x[self.indices['y']]-self.reference[self.indices['y']]])) < pos_tol and np.linalg.norm(np.array([self.curr_x[self.indices['vx']]-self.reference[self.indices['vx']], self.curr_x[self.indices['vy']]-self.reference[self.indices['vy']]])) < vel_tol:
-                if (self.indices['psi'] is not None and abs(self.curr_x[self.indices['psi']] - self.reference[self.indices['psi']]) < angle_tol) or (self.indices['psi'] is None):
+        if not (self._moving_goal[0] or self._moving_goal[1]):
+            if np.linalg.norm(np.array([self._curr_x[self._indices['x']]-self._reference[self._indices['x']], self._curr_x[self._indices['y']]-self._reference[self._indices['y']]])) < pos_tol and np.linalg.norm(np.array([self._curr_x[self._indices['vx']]-self._reference[self._indices['vx']], self._curr_x[self._indices['vy']]-self._reference[self._indices['vy']]])) < vel_tol:
+                if (self._indices['psi'] is not None and abs(self._curr_x[self._indices['psi']] - self._reference[self._indices['psi']]) < angle_tol) or (self._indices['psi'] is None):
                     return True
         # Moving goal, but non-moving reference angle
-        elif self.moving_goal[0] and not self.moving_goal[1]:
-            # print("Current goal position:", self.curr_x[self.indices['goal_x']], self.curr_x[self.indices['goal_y']])
-            if np.linalg.norm(np.array([self.curr_x[self.indices['x']]-self.curr_x[self.indices['goal_x']], self.curr_x[self.indices['y']]-self.curr_x[self.indices['goal_y']]])) < pos_tol and np.linalg.norm(np.array([self.curr_x[self.indices['vx']]-self.curr_x[self.indices['goal_vx']], self.curr_x[self.indices['vy']]-self.curr_x[self.indices['goal_vy']]])) < vel_tol:
-                if (self.indices['psi'] is not None and abs(self.curr_x[self.indices['psi']] - self.reference[self.indices['goal_psi']]) < angle_tol) or (self.indices['psi'] is None):
+        elif self._moving_goal[0] and not self._moving_goal[1]:
+            # print("Current goal position:", self._curr_x[self._indices['goal_x']], self._curr_x[self._indices['goal_y']])
+            if np.linalg.norm(np.array([self._curr_x[self._indices['x']]-self._curr_x[self._indices['goal_x']], self._curr_x[self._indices['y']]-self._curr_x[self._indices['goal_y']]])) < pos_tol and np.linalg.norm(np.array([self._curr_x[self._indices['vx']]-self._curr_x[self._indices['goal_vx']], self._curr_x[self._indices['vy']]-self._curr_x[self._indices['goal_vy']]])) < vel_tol:
+                if (self._indices['psi'] is not None and abs(self._curr_x[self._indices['psi']] - self._reference[self._indices['goal_psi']]) < angle_tol) or (self._indices['psi'] is None):
                     return True
         # TODO: Non-moving goal, moving reference angle
         # Moving goal, moving reference angle
-        elif self.moving_goal[0] and self.moving_goal[1]:
-            if np.linalg.norm(np.array([self.curr_x[self.indices['x']]-self.curr_x[self.indices['goal_x']], self.curr_x[self.indices['y']]-self.curr_x[self.indices['goal_y']]])) < pos_tol and np.linalg.norm(np.array([self.curr_x[self.indices['vx']]-self.curr_x[self.indices['goal_vx']], self.curr_x[self.indices['vy']]-self.curr_x[self.indices['goal_vy']]])) < vel_tol and abs(self.curr_x[self.indices['psi']] - self.curr_x[self.indices['psi']]) < angle_tol:
+        elif self._moving_goal[0] and self._moving_goal[1]:
+            if np.linalg.norm(np.array([self._curr_x[self._indices['x']]-self._curr_x[self._indices['goal_x']], self._curr_x[self._indices['y']]-self._curr_x[self._indices['goal_y']]])) < pos_tol and np.linalg.norm(np.array([self._curr_x[self._indices['vx']]-self._curr_x[self._indices['goal_vx']], self._curr_x[self._indices['vy']]-self._curr_x[self._indices['goal_vy']]])) < vel_tol and abs(self._curr_x[self._indices['psi']] - self._curr_x[self._indices['psi']]) < angle_tol:
                 return True
             
         return False
 
     # functions_called = {'add_first': False, 'add_second': False, 'set_param': False} # (Maybe TODO)
 
-    _states = []             # List of all states
-    states_bounds = []      # List of all state bounds
-    nonlinear_bounds = []   # List of all complex state bounds (e.g. for obstacles)
-    EoM_str = []            # List of all equations of motion
-    x0 = []                 # List of all initial values of the states
-    reference = []          # List of all constant reference values of the states
-    Q_diag = []             # List of all weights on states themselves (diagonal cost matrix elements)
-    Q_off = {}              # Dict of all weights on differences between states (off-diagonal cost matrix elements)
-    QN_diag = []            # List of all terminal weights on states themselves (diagonal cost matrix elements)
-    QN_off = {}             # Dict of all terminal weights on differences between states (off-diagonal cost matrix elements)
+    # Public attributes; Necessary inputs
+    r_robot:            float   = field()   # Radius of the robot
+    ts:                 float   = field()   # Time step of the MPC loop
+    parameters:         dict    = field()   # Dictionary of all parameters (mass etc.) used in the equations of motion (EoM) of the robot
 
-    controls = []           # List of all controls
-    controls_bounds = []    # List of all control bounds
-    R_diag = []             # List of all weights on controls themselves (diagonal cost matrix elements)
+    # Private attributes
+    _states:            List[SX | MX]               = field(init=False, default_factory=list)   # List of all states
+    _states_bounds:     List[List[Optional[float]]] = field(init=False, default_factory=list)   # List of all state bounds
+    _nonlinear_bounds:  List[str]                   = field(init=False, default_factory=list)   # List of all complex state bounds (e.g. for obstacles)
+    _EoM_str:           List[str]                   = field(init=False, default_factory=list)   # List of all equations of motion
+    _x0:                List[float]                 = field(init=False, default_factory=list)   # List of all initial values of the states
+    _reference:         List[float]                 = field(init=False, default_factory=list)   # List of all constant reference values of the states
+    _Q_diag:            List[float]                 = field(init=False, default_factory=list)   # List of all weights on states themselves (diagonal cost matrix elements)
+    _Q_off:             Dict[int, Dict[int, float]] = field(init=False, default_factory=dict)   # Dict of all weights on differences between states (off-diagonal cost matrix elements)
+    _QN_diag:           List[float]                 = field(init=False, default_factory=list)   # List of all terminal weights on states themselves (diagonal cost matrix elements)
+    _QN_off:            Dict[int, Dict[int, float]] = field(init=False, default_factory=dict)   # Dict of all terminal weights on differences between states (off-diagonal cost matrix elements)
 
-    static_obstacles = []   # List of all static obstacles
-    sat_radii = []          # List of all radii of satellite obstacles - used for plotting
-    do_not_plot_ind = []    # List of all indices of states which should not be plotted (obstacle states, goal state)
+    _controls:          List[SX | MX]               = field(init=False, default_factory=list)   # List of all controls
+    _controls_bounds:   List[List[Optional[float]]] = field(init=False, default_factory=list)   # List of all control bounds
+    _R_diag:            List[float]                 = field(init=False, default_factory=list)   # List of all weights on controls themselves (diagonal cost matrix elements)
 
-    moving_goal = [False, False] # [position (and velocity), angle] - Internal use
-    indices = {'x': None, 'y': None, 'psi': None, 'vx': None, 'vy': None, 'dpsi': None, 'goal_x': None, 'goal_y': None, 'goal_psi': None, 'goal_vx': None, 'goal_vy': None} # Internal use
+    _static_obstacles:  List[Circle | Polygon]      = field(init=False, default_factory=list)   # List of all static obstacles
+    _sat_radii:         List[float]                 = field(init=False, default_factory=list)   # List of all radii of satellite obstacles - used for plotting
+    _do_not_plot_ind:   List[int]                   = field(init=False, default_factory=list)   # List of all indices of states which should not be plotted (obstacle states, goal state)
 
-    model = do_mpc.model.Model('continuous')
-    mpc  = None             # MPC controller
-    simulator = None        # MPC simulator (for next step prediction)
+    _moving_goal:       List[bool]                  = field(init=False, default_factory=list)   # [position (and velocity), angle] - Internal use
+    _indices:           Dict[str, int | None]       = field(init=False, default_factory=dict)   # Internal use
+
+    _model:             do_mpc.model.Model          = field(init=False)                         # MPC model
+    _mpc:               do_mpc.controller.MPC       = field(init=False)                         # MPC controller
+    _simulator:         do_mpc.simulator.Simulator  = field(init=False)                         # MPC simulator (for next step prediction)
 
     # During runtime/simulation
-    curr_x = None           # Current states (list) of the robot, using during runtime/simulation
+    _curr_x:            List[float]                 = field(init=False, default_factory=list)   # Current states (list) of the robot, using during runtime/simulation
 
     def __post_init__(self):
-        # Reset all mutable variables
-        self._states = []
-        self.states_bounds = []
-        self.nonlinear_bounds = []
-        self.EoM_str = []
-        self.x0 = []
-        self.reference = []
-        self.Q_diag = []
-        self.Q_off = {}
-        self.QN_diag = []
-        self.QN_off = {}
-
-        self.controls = []
-        self.controls_bounds = []
-        self.R_diag = []
-
-        self.static_obstacles = []
-        self.sat_radii = []
-        self.do_not_plot_ind = []
-
-        self.moving_goal = [False, False]
-        self.indices = {'x': None, 'y': None, 'psi': None, 'vx': None, 'vy': None, 'dpsi': None, 'goal_x': None, 'goal_y': None, 'goal_psi': None, 'goal_vx': None, 'goal_vy': None}
-
+        # Set all non-zero mutable variables; more organized this way
+        self._moving_goal = [False, False]
+        self._indices = {'x': None, 'y': None, 'psi': None, 'vx': None, 'vy': None, 'dpsi': None, 'goal_x': None, 'goal_y': None, 'goal_psi': None, 'goal_vx': None, 'goal_vy': None}
+        self._model = do_mpc.model.Model('continuous')
 
     def add_state(self, name: str, EoM: str, x0: float = 0, reference: float = 0, weight: float = 0, weight_N: float = 0, lower_bound: float = None, upper_bound: float = None):
         '''
@@ -195,21 +154,21 @@ class MPC_2DTracker:
             - upper_bound (float):  (OPTIONAL - default: None) Upper bound of the state
         '''
 
-        if name in self.model.x.keys():
+        if name in self._model.x.keys():
             print(f"WARNING in 'add_state()': State '{name}' already exists. Skipping...")
             return
         
-        state = self.model.set_variable(var_type='_x', var_name=name, shape=(1, 1))
+        state = self._model.set_variable(var_type='_x', var_name=name, shape=(1, 1))
         self._states.append(state)
-        self.EoM_str.append(EoM)
-        self.x0.append(x0)
-        self.reference.append(reference)
-        self.Q_diag.append(weight)
-        self.QN_diag.append(weight_N)
-        self.states_bounds.append([lower_bound, upper_bound])
+        self._EoM_str.append(EoM)
+        self._x0.append(x0)
+        self._reference.append(reference)
+        self._Q_diag.append(weight)
+        self._QN_diag.append(weight_N)
+        self._states_bounds.append([lower_bound, upper_bound])
 
         if name == 'x' or name == 'y' or name == 'vx' or name == 'vy' or name == 'psi' or name == 'dpsi':
-            self.indices[name] = len(self._states) - 1
+            self._indices[name] = len(self._states) - 1
 
         globals()[name] = state
 
@@ -224,13 +183,13 @@ class MPC_2DTracker:
             - upper_bound (float):  (OPTIONAL - default: None) Upper bound of the control
         '''
 
-        if name in self.model.u.keys():
+        if name in self._model.u.keys():
             print(f"WARNING in 'add_control()': Control '{name}' already exists. Skipping...")
             return
-        control = self.model.set_variable(var_type='_u', var_name=name, shape=(1, 1))
-        self.controls.append(control)
-        self.R_diag.append(weight)
-        self.controls_bounds.append([lower_bound, upper_bound])
+        control = self._model.set_variable(var_type='_u', var_name=name, shape=(1, 1))
+        self._controls.append(control)
+        self._R_diag.append(weight)
+        self._controls_bounds.append([lower_bound, upper_bound])
 
         globals()[name] = control
 
@@ -249,12 +208,12 @@ class MPC_2DTracker:
         '''
         # Helper function
         def _circle_obstacle(c: Circle):
-            self.static_obstacles.append(c)
+            self._static_obstacles.append(c)
             if w == 0 and wN == 0:
-                self.nonlinear_bounds.append(f"(({c.radius} + {self.r_robot})*(1 + {self.ts}))**2 - (x - {c.center[0]})**2 - (y - {c.center[1]})**2") # Safety margin of 'ts' chosen somewhat arbitrarily
+                self._nonlinear_bounds.append(f"(({c.radius} + {self.r_robot})*(1 + {self.ts}))**2 - (x - {c.center[0]})**2 - (y - {c.center[1]})**2") # Safety margin of 'ts' chosen somewhat arbitrarily
             else:
-                self.add_state(f'static_sqd{len(self.static_obstacles)}', f'2*(x-{c.center[0]})*vx + 2*(y-{c.center[1]})*vy', weight = w, weight_N = wN, x0 = (self.x0[self.indices['x']] - c.center[0])**2 + (self.x0[self.indices['y']] - c.center[1])**2, lower_bound = ((c.radius + self.r_robot)*(1 + self.ts))**2) # Safety margin of 'ts' chosen somewhat arbitrarily
-                self.do_not_plot_ind.append(len(self._states) - 1)
+                self.add_state(f'static_sqd{len(self._static_obstacles)}', f'2*(x-{c.center[0]})*vx + 2*(y-{c.center[1]})*vy', weight = w, weight_N = wN, x0 = (self._x0[self._indices['x']] - c.center[0])**2 + (self._x0[self._indices['y']] - c.center[1])**2, lower_bound = ((c.radius + self.r_robot)*(1 + self.ts))**2) # Safety margin of 'ts' chosen somewhat arbitrarily
+                self._do_not_plot_ind.append(len(self._states) - 1)
 
         # Polygon obstacle (TODO)
         if isinstance(obstacle, Polygon):
@@ -264,7 +223,7 @@ class MPC_2DTracker:
                 if not(w == 0 and wN == 0): # TODO
                     raise NotImplementedError("ERROR in 'add_static_obstacle()': Weights for polygon obstacles are not yet implemented. Please set 'simplify_Polygon' to 'True' or set 'w' and 'wN' to 0.")
                 else:
-                    self.static_obstacles.append(obstacle)
+                    self._static_obstacles.append(obstacle)
                     nl_constraint_str = ''
                     for coeffs in obstacle._set_equations[:-1]:
                         nl_constraint_str += f'fmin({coeffs[2] + (self.r_robot*np.sqrt(coeffs[0]**2 + coeffs[1]**2))*(2 + 0*self.ts)} - ({coeffs[0]}*x + {coeffs[1]}*y),'
@@ -274,18 +233,18 @@ class MPC_2DTracker:
                     # print("Last coeffs:", np.around(last_coeffs[:-1], 2))
                     nl_constraint_str += f"{last_coeffs[2] + (self.r_robot*np.sqrt(last_coeffs[0]**2 + last_coeffs[1]**2))*(2 + 0*self.ts)} - ({last_coeffs[0]}*x + {last_coeffs[1]}*y)" + ')'*(len(obstacle._set_equations) - 1)
                     # nl_constraint_str += f"{last_coeffs[2]} - ({last_coeffs[0]}*x + {last_coeffs[1]}*y)" + ')'*(len(obstacle._set_equations) - 1)
-                    self.nonlinear_bounds.append(nl_constraint_str)
+                    self._nonlinear_bounds.append(nl_constraint_str)
                     # print(nl_constraint_str)
         
         elif isinstance(obstacle, Circle):
             if simplify_Polygon:
                 print("WARNING in 'add_static_obstacle()': Simplification of polygons is not applicable for circles - ignoring...")
-            # self.static_obstacles.append(obstacle)
+            # self._static_obstacles.append(obstacle)
             # if w == 0 and wN == 0:
-            #     self.nonlinear_bounds.append(f"(({obstacle.radius} + {self.r_robot})*(1 + {self.ts}))**2 - (x - {obstacle.center[0]})**2 - (y - {obstacle.center[1]})**2") # Safety margin of 'ts' chosen somewhat arbitrarily
+            #     self._nonlinear_bounds.append(f"(({obstacle.radius} + {self.r_robot})*(1 + {self.ts}))**2 - (x - {obstacle.center[0]})**2 - (y - {obstacle.center[1]})**2") # Safety margin of 'ts' chosen somewhat arbitrarily
             # else:
-            #     self.add_state(f'static_sqd{len(self.static_obstacles)}', f'2*(x-{obstacle.center[0]})*vx + 2*(y-{obstacle.center[1]})*vy', weight = w, weight_N = wN, x0 = (self.x0[self.indices['x']] - obstacle.center[0])**2 + (self.x0[self.indices['y']] - obstacle.center[1])**2, lower_bound = ((obstacle.radius + self.r_robot)*(1 + self.ts))**2) # Safety margin of 'ts' chosen somewhat arbitrarily
-            #     self.do_not_plot_ind.append(len(self._states) - 1)
+            #     self.add_state(f'static_sqd{len(self._static_obstacles)}', f'2*(x-{obstacle.center[0]})*vx + 2*(y-{obstacle.center[1]})*vy', weight = w, weight_N = wN, x0 = (self._x0[self._indices['x']] - obstacle.center[0])**2 + (self._x0[self._indices['y']] - obstacle.center[1])**2, lower_bound = ((obstacle.radius + self.r_robot)*(1 + self.ts))**2) # Safety margin of 'ts' chosen somewhat arbitrarily
+            #     self._do_not_plot_ind.append(len(self._states) - 1)
             _circle_obstacle(obstacle)
         else:
             raise AssertionError(f"ERROR in 'add_static_obstacle()': Obstacle must be of type 'Circle' or 'Polygon', but got type '{type(obstacle).__name__}' instead")
@@ -305,11 +264,11 @@ class MPC_2DTracker:
             - wN (float):           (OPTIONAL - default: 0) Terminal weight of the distance to the obstacle in the cost function
         '''
 
-        if self.indices['x'] is None or self.indices['y'] is None or self.indices['vx'] is None or self.indices['vy'] is None:
+        if self._indices['x'] is None or self._indices['y'] is None or self._indices['vx'] is None or self._indices['vy'] is None:
             raise AssertionError("WARNING in 'add_satellite_obstacle()': States 'x', 'y', 'vx' and 'vy' must all be added before adding satellite obstacles. Skipping...")
 
-        self.sat_radii.append(r_satellite)
-        n_theta = len(self.sat_radii)
+        self._sat_radii.append(r_satellite)
+        n_theta = len(self._sat_radii)
         self.add_state(f'theta{n_theta}', str(omega_orbit), x0 = theta0_orbit)
 
         sat_vx = f'-{r_orbit}*{omega_orbit}*sin(theta{n_theta})'
@@ -321,9 +280,9 @@ class MPC_2DTracker:
         self.add_state(f'sat_y{n_theta}', sat_vy, x0 = sat_center_y0)
 
         vd = f'2*(vx - {sat_vx})*(x - sat_x{n_theta}) + 2*(vy - {sat_vy})*(y - sat_y{n_theta})'
-        d_x0 = (self.x0[self.indices['x']] - sat_center_x0)**2 + (self.x0[self.indices['y']] - sat_center_y0)**2
+        d_x0 = (self._x0[self._indices['x']] - sat_center_x0)**2 + (self._x0[self._indices['y']] - sat_center_y0)**2
         self.add_state(f'sat_sqd{n_theta}', vd, weight = w, weight_N = wN, x0 = d_x0, lower_bound = ((r_satellite + self.r_robot)*(1 + self.ts))**2) # Safety margin of 'ts' chosen somewhat arbitrarily
-        self.do_not_plot_ind.extend([len(self._states) - 1, len(self._states) - 2, len(self._states) - 3, len(self._states) - 4])
+        self._do_not_plot_ind.extend([len(self._states) - 1, len(self._states) - 2, len(self._states) - 3, len(self._states) - 4])
 
     def set_difference_weight(self, state_1: str, state_2: str, weight: float, weight_N: float): # TODO: Extend to inputs
         '''
@@ -341,24 +300,24 @@ class MPC_2DTracker:
         if state_1 == state_2:
             raise AssertionError(f"ERROR in 'set_difference_weight()': States '{state_1}' and '{state_2}' are not allowed to be the same")
         
-        if len(self.Q_off) > 0 ^ len(self.QN_off) > 0: # '^' symbol represents XOR
+        if len(self._Q_off) > 0 ^ len(self._QN_off) > 0: # '^' symbol represents XOR
             raise AssertionError("ERROR in 'set_difference_weight()': Either both Q_off and QN_off must be empty or both must be dicts of dicts - should not happen")
 
         state_1_ind = self.find_state_index(state_1)
         state_2_ind = self.find_state_index(state_2)
 
-        if state_1_ind in self.Q_off:
-            if state_2_ind in self.Q_off[state_1_ind] and self.Q_off[state_1_ind][state_2_ind] != 0:
+        if state_1_ind in self._Q_off:
+            if state_2_ind in self._Q_off[state_1_ind] and self._Q_off[state_1_ind][state_2_ind] != 0:
                 print(f"WARNING in 'set_difference_weight()': Weight for difference between '{state_1}' and '{state_2}' already set - it will be overwritten")
                 
-        if state_1_ind in self.QN_off:
-            if state_2_ind in self.QN_off[state_1_ind] and self.QN_off[state_1_ind][state_2_ind] != 0:
+        if state_1_ind in self._QN_off:
+            if state_2_ind in self._QN_off[state_1_ind] and self._QN_off[state_1_ind][state_2_ind] != 0:
                 print(f"WARNING in 'set_difference_weight()': Terminal weight for difference between '{state_1}' and '{state_2}' already set - it will be overwritten")
         
-        self.Q_off[state_1_ind] = {state_2_ind: -weight, state_1_ind: weight}
-        self.Q_off[state_2_ind] = {state_1_ind: -weight, state_2_ind: weight}
-        self.QN_off[state_1_ind] = {state_2_ind: -weight_N, state_1_ind: weight_N}
-        self.QN_off[state_2_ind] = {state_1_ind: -weight_N, state_2_ind: weight_N}
+        self._Q_off[state_1_ind] = {state_2_ind: -weight, state_1_ind: weight}
+        self._Q_off[state_2_ind] = {state_1_ind: -weight, state_2_ind: weight}
+        self._QN_off[state_1_ind] = {state_2_ind: -weight_N, state_1_ind: weight_N}
+        self._QN_off[state_2_ind] = {state_1_ind: -weight_N, state_2_ind: weight_N}
 
     def add_moving_reference(): # TODO: make this general function for references which do not depend on other (possibly undefined) states
         pass
@@ -377,16 +336,16 @@ class MPC_2DTracker:
             - wN (float):           (OPTIONAL - default: 0) Terminal weight of the distance to the goal position in the cost function - if 0, then w cannot be 0
         '''
 
-        if self.indices['x'] is None or self.indices['y'] is None or self.indices['vx'] is None or self.indices['vy'] is None:
+        if self._indices['x'] is None or self._indices['y'] is None or self._indices['vx'] is None or self._indices['vy'] is None:
             raise AssertionError("ERROR in 'add_satellite_goal_position()': States 'x', 'y', 'vx' and 'vy' must all be added before adding a satellite goal position.")
         
-        if self.indices['psi'] is None and (w_angle != 0 or wN_angle != 0):
+        if self._indices['psi'] is None and (w_angle != 0 or wN_angle != 0):
             raise AssertionError("ERROR in 'add_satellite_goal_position()': Weights and terminals weight for angle are not 0, but no state 'psi' (robot yaw angle) has been added - no moving goal can be implemented")
         
-        if self.indices['dpsi'] is None and (w_angvel != 0 or wN_angvel != 0):
+        if self._indices['dpsi'] is None and (w_angvel != 0 or wN_angvel != 0):
             raise AssertionError("ERROR in 'add_satellite_goal_position()': Weights and terminals weight for omega are not 0, but no state 'dpsi' (robot yaw rate) has been added - no moving goal can be implemented")
         
-        if self.indices['goal_x'] is not None or self.indices['goal_y'] is not None:
+        if self._indices['goal_x'] is not None or self._indices['goal_y'] is not None:
             print("WARNING in 'add_satellite_goal_position()': Moving goal position has already been set - the new position will be ignored")
             return
         
@@ -395,72 +354,72 @@ class MPC_2DTracker:
             return
         
         if w_pos != 0 or wN_pos != 0:
-            self.moving_goal[0] = True
+            self._moving_goal[0] = True
         if w_angle != 0 or wN_angle != 0:
-            self.moving_goal[1] = True
+            self._moving_goal[1] = True
 
-        if self.Q_diag[self.indices['x']] != 0:
+        if self._Q_diag[self._indices['x']] != 0:
             print(f"WARNING in 'add_satellite_goal_position()': Previous weight for state 'x' is not 0 - weight will be overwritten.")
-            self.Q_diag[self.indices['x']] = 0
+            self._Q_diag[self._indices['x']] = 0
 
-        if self.QN_diag[self.indices['x']] != 0:
+        if self._QN_diag[self._indices['x']] != 0:
             print(f"WARNING in 'add_satellite_goal_position()': Previous terminal weight for state 'x' is not 0 - weight will be overwritten.")
-            self.QN_diag[self.indices['x']] = 0
+            self._QN_diag[self._indices['x']] = 0
 
-        if self.Q_diag[self.indices['y']] != 0:
+        if self._Q_diag[self._indices['y']] != 0:
             print(f"WARNING in 'add_satellite_goal_position()': Previous weight for state 'y' is not 0 - weight will be overwritten.")
-            self.Q_diag[self.indices['y']] = 0
+            self._Q_diag[self._indices['y']] = 0
 
-        if self.QN_diag[self.indices['y']] != 0:
+        if self._QN_diag[self._indices['y']] != 0:
             print(f"WARNING in 'add_satellite_goal_position()': Previous terminal weight for state 'y' is not 0 - weight will be overwritten.")
-            self.QN_diag[self.indices['y']] = 0
+            self._QN_diag[self._indices['y']] = 0
 
-        if self.Q_diag[self.indices['vx']] != 0:
+        if self._Q_diag[self._indices['vx']] != 0:
             print(f"WARNING in 'add_satellite_goal_position()': Previous weight for state 'vx' is not 0 - weight will be overwritten.")
-            self.Q_diag[self.indices['vx']] = 0
+            self._Q_diag[self._indices['vx']] = 0
         
-        if self.QN_diag[self.indices['vx']] != 0:
+        if self._QN_diag[self._indices['vx']] != 0:
             print(f"WARNING in 'add_satellite_goal_position()': Previous terminal weight for state 'vx' is not 0 - weight will be overwritten.")
-            self.QN_diag[self.indices['vx']] = 0
+            self._QN_diag[self._indices['vx']] = 0
 
-        if self.Q_diag[self.indices['vy']] != 0:
+        if self._Q_diag[self._indices['vy']] != 0:
             print(f"WARNING in 'add_satellite_goal_position()': Previous weight for state 'vy' is not 0 - weight will be overwritten.")
-            self.Q_diag[self.indices['vy']] = 0
+            self._Q_diag[self._indices['vy']] = 0
 
-        if self.QN_diag[self.indices['vy']] != 0:
+        if self._QN_diag[self._indices['vy']] != 0:
             print(f"WARNING in 'add_satellite_goal_position()': Previous terminal weight for state 'vy' is not 0 - weight will be overwritten.")
-            self.QN_diag[self.indices['vy']] = 0
+            self._QN_diag[self._indices['vy']] = 0
 
-        if self.indices['psi'] is not None:
-            if self.Q_diag[self.indices['psi']] != 0:
+        if self._indices['psi'] is not None:
+            if self._Q_diag[self._indices['psi']] != 0:
                 print(f"WARNING in 'add_satellite_goal_position()': Previous weight for state 'psi' is not 0 - weight will be overwritten.")
-                self.Q_diag[self.indices['psi']] = 0
+                self._Q_diag[self._indices['psi']] = 0
 
-            if self.QN_diag[self.indices['psi']] != 0:
+            if self._QN_diag[self._indices['psi']] != 0:
                 print(f"WARNING in 'add_satellite_goal_position()': Previous terminal weight for state 'psi' is not 0 - weight will be overwritten.")
-                self.QN_diag[self.indices['psi']] = 0
+                self._QN_diag[self._indices['psi']] = 0
 
-        if self.indices['dpsi'] is not None and (w_angvel != 0 or wN_angvel != 0):
-            if self.Q_diag[self.indices['dpsi']] != 0 and w_angvel != 0:
+        if self._indices['dpsi'] is not None and (w_angvel != 0 or wN_angvel != 0):
+            if self._Q_diag[self._indices['dpsi']] != 0 and w_angvel != 0:
                 print(f"WARNING in 'add_satellite_goal_position()': Previous weight for state 'dpsi' is not 0 - weight will be overwritten.")
-                self.Q_diag[self.indices['dpsi']] = 0
+                self._Q_diag[self._indices['dpsi']] = 0
 
-            if self.QN_diag[self.indices['dpsi']] != 0 and wN_angvel != 0:
+            if self._QN_diag[self._indices['dpsi']] != 0 and wN_angvel != 0:
                 print(f"WARNING in 'add_satellite_goal_position()': Previous terminal weight for state 'dpsi' is not 0 - weight will be overwritten.")
-                self.QN_diag[self.indices['dpsi']] = 0
+                self._QN_diag[self._indices['dpsi']] = 0
 
-            if self.reference[self.indices['dpsi']] != omega_orbit:
-                print(f"WARNING in 'add_satellite_goal_position()': Reference value for state 'dpsi' is not equal to the angular velocity of the orbit - the reference value (currently {self.reference[self.indices['dpsi']]}) will be overwritten to {omega_orbit}")
-            self.reference[self.indices['dpsi']] = omega_orbit
+            if self._reference[self._indices['dpsi']] != omega_orbit:
+                print(f"WARNING in 'add_satellite_goal_position()': Reference value for state 'dpsi' is not equal to the angular velocity of the orbit - the reference value (currently {self._reference[self._indices['dpsi']]}) will be overwritten to {omega_orbit}")
+            self._reference[self._indices['dpsi']] = omega_orbit
 
 
         self.add_state('goal_psi', str(omega_orbit), x0 = psi0_orbit) # TODO: Check if goal is not always "standing on" satellite, i.e. add constant angle here (or idk what to do)
-        self.indices['goal_psi'] = len(self._states) - 1
+        self._indices['goal_psi'] = len(self._states) - 1
         
-        if self.indices['psi'] is None:
+        if self._indices['psi'] is None:
             if psi0_orbit != 0:
                 raise AssertionError("ERROR in 'add_satellite_goal_position()': Initial angle of the orbit is not 0, but no state 'psi' (robot yaw angle) has been added, meaning the goal state may never be reached. Please either add a 'psi' state or set the initial angle to 0.")
-            if self.indices['dpsi'] is None:
+            if self._indices['dpsi'] is None:
                 print("WARNING in 'add_satellite_goal_position()': States 'psi' (robot yaw angle) and 'dpsi' (yaw rate) have not been added - the robot will be modeled as a non-rotating point mass")
             else:
                 print("WARNING in 'add_satellite_goal_position()': State 'psi' (robot yaw angle) has not been added, but 'dpsi' has. In this case, this class assumes that 'dpsi' is not the robot's yaw rate, but some other angular velocity. If this was not intended, then please add the state 'psi' and set 'dpsi' to be the yaw rate.")
@@ -470,46 +429,46 @@ class MPC_2DTracker:
         # goal_vx = f'-{r_orbit}*{omega_orbit}*sin(goal_psi)'
         # goal_center_x0 = x_center + r_orbit*np.cos(psi0_orbit)
         # self.add_state('goal_x', goal_vx, x0 = goal_center_x0)
-        # self.indices['goal_x'] = len(self._states) - 1
+        # self._indices['goal_x'] = len(self._states) - 1
         # self.set_difference_weight('x', 'goal_x', weight = w_pos, weight_N = wN_pos)
 
         # # TODO: Instead of this, one has to add a state 'goal_vx' and 'goal_vy' and set the difference weight between 'vx' and 'goal_vx' and between 'vy' and 'goal_vy'
-        # if not np.isclose(self.reference[self.indices['vx']], r_orbit*omega_orbit):
-        #     print(f"WARNING in 'add_satellite_goal_position()': Reference velocity 'vx' is not equal to the velocity of the orbit - the reference velocity (currently {self.reference[self.indices['vx']]}) will be overwritten to {r_orbit*omega_orbit}")
-        # self.reference[self.indices['vx']] = r_orbit*omega_orbit
+        # if not np.isclose(self._reference[self._indices['vx']], r_orbit*omega_orbit):
+        #     print(f"WARNING in 'add_satellite_goal_position()': Reference velocity 'vx' is not equal to the velocity of the orbit - the reference velocity (currently {self._reference[self._indices['vx']]}) will be overwritten to {r_orbit*omega_orbit}")
+        # self._reference[self._indices['vx']] = r_orbit*omega_orbit
 
         # self.add_state('goal_vx', goal_vx, x0 = goal_center_x0)
 
         # goal_vy = f'{r_orbit}*{omega_orbit}*cos(goal_psi)'
         # goal_center_y0 = y_center + r_orbit*np.sin(psi0_orbit)
         # self.add_state('goal_y', goal_vy, x0 = goal_center_y0)
-        # self.indices['goal_y'] = len(self._states) - 1
+        # self._indices['goal_y'] = len(self._states) - 1
         # self.set_difference_weight('y', 'goal_y', weight = w_pos, weight_N = wN_pos)
 
         # # TODO: Instead of this, one has to add a state 'goal_vx' and 'goal_vy' and set the difference weight between 'vx' and 'goal_vx' and between 'vy' and 'goal_vy'
-        # if not np.isclose(self.reference[self.indices['vy']], r_orbit*omega_orbit):
-        #     print(f"WARNING in 'add_satellite_goal_position()': Reference velocity 'vy' is not equal to the velocity of the orbit - the reference velocity (currently {self.reference[self.indices['vy']]}) will be overwritten to {r_orbit*omega_orbit}")
-        # self.reference[self.indices['vy']] = r_orbit*omega_orbit
+        # if not np.isclose(self._reference[self._indices['vy']], r_orbit*omega_orbit):
+        #     print(f"WARNING in 'add_satellite_goal_position()': Reference velocity 'vy' is not equal to the velocity of the orbit - the reference velocity (currently {self._reference[self._indices['vy']]}) will be overwritten to {r_orbit*omega_orbit}")
+        # self._reference[self._indices['vy']] = r_orbit*omega_orbit
             
         v0 = r_orbit*omega_orbit
         vx0 = -v0*np.sin(psi0_orbit)
         vy0 = v0*np.cos(psi0_orbit)
 
         self.add_state('goal_x', 'goal_vx', x0 = x_center + r_orbit*np.cos(psi0_orbit))
-        self.indices['goal_x'] = len(self._states) - 1
+        self._indices['goal_x'] = len(self._states) - 1
         self.set_difference_weight('x', 'goal_x', weight = w_pos, weight_N = wN_pos)
         self.add_state('goal_vx', f'-{r_orbit}*{omega_orbit**2}*cos(goal_psi)', x0 = vx0)
-        self.indices['goal_vx'] = len(self._states) - 1
+        self._indices['goal_vx'] = len(self._states) - 1
         self.set_difference_weight('vx', 'goal_vx', weight = w_vel, weight_N = wN_vel)
 
         self.add_state('goal_y', 'goal_vy', x0 = y_center + r_orbit*np.sin(psi0_orbit))
-        self.indices['goal_y'] = len(self._states) - 1
+        self._indices['goal_y'] = len(self._states) - 1
         self.set_difference_weight('y', 'goal_y', weight = w_pos, weight_N = wN_pos)
         self.add_state('goal_vy', f'-{r_orbit}*{omega_orbit**2}*sin(goal_psi)', x0 = vy0)
-        self.indices['goal_vy'] = len(self._states) - 1
+        self._indices['goal_vy'] = len(self._states) - 1
         self.set_difference_weight('vy', 'goal_vy', weight = w_vel, weight_N = wN_vel)
 
-        self.do_not_plot_ind.extend([len(self._states) - 1, len(self._states) - 2, len(self._states) - 3, len(self._states) - 4, len(self._states) - 5])
+        self._do_not_plot_ind.extend([len(self._states) - 1, len(self._states) - 2, len(self._states) - 3, len(self._states) - 4, len(self._states) - 5])
 
     def set_horizon(self, horizon_length: int):
         '''
@@ -528,98 +487,98 @@ class MPC_2DTracker:
             Finishes the first part of MPC model by setting the equations of motion and calling an internal setup() function.
             '''
 
-            if len(self.static_obstacles) > 0 and not ('x' in self.model.x.keys() and 'y' in self.model.x.keys() and 'vx' in self.model.x.keys() and 'vy' in self.model.x.keys()):
+            if len(self._static_obstacles) > 0 and not ('x' in self._model.x.keys() and 'y' in self._model.x.keys() and 'vx' in self._model.x.keys() and 'vy' in self._model.x.keys()):
                 raise AssertionError("ERROR in 'end_setup()': 'x', 'y', 'vx' and 'vy' must be set as states if obstacles are present")
 
             for i in range(len(self._states)):
                 try:
                     # print("x_goal:", x_goal)
                     # print("m:", m)
-                    expr = eval(self.EoM_str[i], globals() | self.parameters)
+                    expr = eval(self._EoM_str[i], globals() | self.parameters)
                 except:
-                    raise ValueError(f"ERROR in 'end_setup()': EoM string '{self.EoM_str[i]}' not valid - see if e.g. all constants, states and inputs in the EoM are defined and that the parameter dict is passed correctly")
+                    raise ValueError(f"ERROR in 'end_setup()': EoM string '{self._EoM_str[i]}' not valid - see if e.g. all constants, states and inputs in the EoM are defined and that the parameter dict is passed correctly")
                 
                 if isinstance(expr, float) or isinstance(expr, int):
                     expr = SX(expr)
-                self.model.set_rhs(self.model.x.keys()[i], expr)
+                self._model.set_rhs(self._model.x.keys()[i], expr)
 
-            self.model.setup()
+            self._model.setup()
 
         model_end_setup()
 
         # Set sampling time and horizon length
-        self.mpc = do_mpc.controller.MPC(self.model)
-        self.mpc.set_param(t_step=self.ts, n_horizon=horizon_length)
+        self._mpc = do_mpc.controller.MPC(self._model)
+        self._mpc.set_param(t_step=self.ts, n_horizon=horizon_length)
 
         def mpc_end_setup():
             '''
             Finishes the second part of MPC model by setting the cost function and bounds and calling an internal setup() function.
             '''
             # Set quadratic objective
-            Q = np.diag(self.Q_diag)
-            R = np.diag(self.R_diag)
-            QN = np.diag(self.QN_diag)
+            Q = np.diag(self._Q_diag)
+            R = np.diag(self._R_diag)
+            QN = np.diag(self._QN_diag)
 
-            if len(self.Q_off) == 0 and len(self.QN_off) == 0:
+            if len(self._Q_off) == 0 and len(self._QN_off) == 0:
                 n_states = len(self._states)
                 Q_off = np.zeros((n_states, n_states))
                 QN_off = np.zeros((n_states, n_states))
-            elif len(self.Q_off) == 0 or len(self.QN_off) == 0:
+            elif len(self._Q_off) == 0 or len(self._QN_off) == 0:
                 raise ValueError("ERROR in 'end_setup()': Either both Q_off and QN_off must be empty or both must be dicts of dicts - should not happen")
             else:
                 Q_off = np.zeros((len(self._states), len(self._states)))
                 QN_off = np.zeros((len(self._states), len(self._states)))
                 for i in range(len(self._states)):
-                    if i in self.Q_off:
-                        for j in self.Q_off[i]:
-                            Q_off[i, j] = self.Q_off[i][j]
-                    if i in self.QN_off:
-                        for j in self.QN_off[i]:
-                            QN_off[i, j] = self.QN_off[i][j]
+                    if i in self._Q_off:
+                        for j in self._Q_off[i]:
+                            Q_off[i, j] = self._Q_off[i][j]
+                    if i in self._QN_off:
+                        for j in self._QN_off[i]:
+                            QN_off[i, j] = self._QN_off[i][j]
             
             def weighted_norm(vec: np.ndarray, mat: np.ndarray):
                 return np.dot(vec.T, np.dot(mat, vec)).item()
             st = np.array(self._states).reshape(-1, 1)
-            ct = np.array(self.controls).reshape(-1, 1)
-            ref = np.array(self.reference).reshape(-1, 1)
+            ct = np.array(self._controls).reshape(-1, 1)
+            ref = np.array(self._reference).reshape(-1, 1)
             lterm = weighted_norm(st - ref, Q) + weighted_norm(st, Q_off) + weighted_norm(ct, R)
             mterm = weighted_norm(st - ref, QN) + weighted_norm(st, QN_off)
-            self.mpc.set_objective(lterm=lterm, mterm=mterm)
+            self._mpc.set_objective(lterm=lterm, mterm=mterm)
 
             # Set bounds
-            xkeys = self.model.x.keys()
-            for bound_ind, bound in enumerate(self.states_bounds):
+            xkeys = self._model.x.keys()
+            for bound_ind, bound in enumerate(self._states_bounds):
                 if bound[0] is not None:
-                    self.mpc.bounds['lower', '_x', xkeys[bound_ind]] = bound[0]
+                    self._mpc.bounds['lower', '_x', xkeys[bound_ind]] = bound[0]
                 if bound[1] is not None:
-                    self.mpc.bounds['upper', '_x', xkeys[bound_ind]] = bound[1]
-            # if len(self.nonlinear_bounds) > 0:
-            for ind, nonlinear_bound in enumerate(self.nonlinear_bounds):
+                    self._mpc.bounds['upper', '_x', xkeys[bound_ind]] = bound[1]
+            # if len(self._nonlinear_bounds) > 0:
+            for ind, nonlinear_bound in enumerate(self._nonlinear_bounds):
                 # print(f"Setting nonlinear constraint {ind}: {nonlinear_bound}")
-                self.mpc.set_nl_cons(f"nonlinear_constraint_{ind}", eval(nonlinear_bound), ub=0)
-                # self.mpc.set_nl_cons("test", eval('fmin(0, x)'), ub=0)
+                self._mpc.set_nl_cons(f"nonlinear_constraint_{ind}", eval(nonlinear_bound), ub=0)
+                # self._mpc.set_nl_cons("test", eval('fmin(0, x)'), ub=0)
 
-            if 'default' in self.model.u.keys():
-                ukeys = [i for i in self.model.u.keys() if i != 'default']
+            if 'default' in self._model.u.keys():
+                ukeys = [i for i in self._model.u.keys() if i != 'default']
             else:
-                ukeys = self.model.u.keys()
-            for bound_ind, bound in enumerate(self.controls_bounds):
+                ukeys = self._model.u.keys()
+            for bound_ind, bound in enumerate(self._controls_bounds):
                 if bound[0] is not None:
-                    self.mpc.bounds['lower', '_u', ukeys[bound_ind]] = bound[0]
+                    self._mpc.bounds['lower', '_u', ukeys[bound_ind]] = bound[0]
                 if bound[1] is not None:
-                    self.mpc.bounds['upper', '_u', ukeys[bound_ind]] = bound[1]
+                    self._mpc.bounds['upper', '_u', ukeys[bound_ind]] = bound[1]
 
-            self.mpc.setup()
+            self._mpc.setup()
 
         mpc_end_setup()
 
         # Set initial values
-        self.mpc.set_initial_guess()
-        self.simulator = do_mpc.simulator.Simulator(self.model)
-        self.simulator.set_param(t_step=self.ts)
-        self.simulator.setup()
-        self.simulator.x0 = np.array(self.x0)
-        self.curr_x = self.simulator.make_step(np.zeros((len(self.controls), 1))).flatten() # Initial prediction
+        self._mpc.set_initial_guess()
+        self._simulator = do_mpc.simulator.Simulator(self._model)
+        self._simulator.set_param(t_step=self.ts)
+        self._simulator.setup()
+        self._simulator.x0 = np.array(self._x0)
+        self._curr_x = self._simulator.make_step(np.zeros((len(self._controls), 1))).flatten() # Initial prediction
     
     def next_step(self, x0: dict, pos_tol: float = 0.01, vel_tol:float = 0.01, angle_tol: float = 0.01, suppress_output: bool = True) -> Tuple[np.ndarray, np.ndarray]: # or None
         '''
@@ -639,8 +598,8 @@ class MPC_2DTracker:
         '''
 
         for state_str, state_val in x0.items():
-            if state_str in self.model.x.keys():
-                # if state_str not in self.indices:
+            if state_str in self._model.x.keys():
+                # if state_str not in self._indices:
                 #     print(f"WARNING in 'next_step()': State '{state_str}' should solely be used internally - your value will be ignored") # TODO: Maybe change?
                 #     continue
 
@@ -650,7 +609,7 @@ class MPC_2DTracker:
                 if not (isinstance(state_val, float) or isinstance(state_val, int)):
                     raise AssertionError(f"ERROR in 'next_step()': Value for state '{state_str}' is neither an int nor a float - please give valid state values")
                 else:
-                    self.curr_x[self.find_state_index(state_str)] = state_val
+                    self._curr_x[self.find_state_index(state_str)] = state_val
             else:
                 raise AssertionError(f"ERROR in 'next_step()': State '{state_str}' not defined - please give valid state names")
 
@@ -661,146 +620,146 @@ class MPC_2DTracker:
                 original_stdout = sys.stdout
                 sys.stdout = open(os.devnull, 'w')
 
-            u0 = self.mpc.make_step(self.curr_x)            
-            self.curr_x = self.simulator.make_step(u0).flatten()
+            u0 = self._mpc.make_step(self._curr_x)            
+            self._curr_x = self._simulator.make_step(u0).flatten()
 
             if suppress_output:
                 sys.stdout = original_stdout
 
-            return (u0, self.curr_x)
+            return (u0, self._curr_x)
  
-    def simulate_mpc(self, max_steps: float = 1000, plot_data: bool = False, plot_map: bool = True, noise: tuple = (0, 0, 0), xlim = None, ylim = None, time_factor: float = 1, max_size: bool = False, suppress_mpc_output: bool = True):
-        '''
-        Simulates the MPC and plots the results. This function can only be called after the model has been compiled (by setting its horizon length).
+    # def simulate_mpc(self, max_steps: float = 1000, plot_data: bool = False, plot_map: bool = True, noise: tuple = (0, 0, 0), xlim = None, ylim = None, time_factor: float = 1, max_size: bool = False, suppress_mpc_output: bool = True):
+    #     '''
+    #     Simulates the MPC and plots the results. This function can only be called after the model has been compiled (by setting its horizon length).
 
-        Inputs:
-            - max_steps (int):      (OPTIONAL - default: 1000) Maximum number of MPC steps to simulate
-            - plot_data (bool):     (OPTIONAL - default: False) If True, the data of each state and input will be plotted separately
-            - plot_map (bool):      (OPTIONAL - default: True) If True, the robot position (x, y) as well as all obstacles and the goal will be animated over time
-            - noise (tuple):        (OPTIONAL - default: (0, 0, 0)) Tuple of three floats (mean, std, max) for the gaussian noise added to the x and y position # TODO: add noise to controls as well # TODO in general
-            - xlim (tuple):         (OPTIONAL - default: None) Tuple of two floats (xmin, xmax) for the x-axis limits of the map plot
-            - ylim (tuple):         (OPTIONAL - default: None) Tuple of two floats (ymin, ymax) for the y-axis limits of the map plot
-            - time_factor (float):  (OPTIONAL - default: 1) Factor by which the time between each MPC step is multiplied for the animation
-            - max_size (bool):      (OPTIONAL - default: False) If True, the map plot will be maximized
-            - mpc_output (bool):    (OPTIONAL - default: False) If True, the output of the MPC will be printed in detail in each time step
-        '''
+    #     Inputs:
+    #         - max_steps (int):      (OPTIONAL - default: 1000) Maximum number of MPC steps to simulate
+    #         - plot_data (bool):     (OPTIONAL - default: False) If True, the data of each state and input will be plotted separately
+    #         - plot_map (bool):      (OPTIONAL - default: True) If True, the robot position (x, y) as well as all obstacles and the goal will be animated over time
+    #         - noise (tuple):        (OPTIONAL - default: (0, 0, 0)) Tuple of three floats (mean, std, max) for the gaussian noise added to the x and y position # TODO: add noise to controls as well # TODO in general
+    #         - xlim (tuple):         (OPTIONAL - default: None) Tuple of two floats (xmin, xmax) for the x-axis limits of the map plot
+    #         - ylim (tuple):         (OPTIONAL - default: None) Tuple of two floats (ymin, ymax) for the y-axis limits of the map plot
+    #         - time_factor (float):  (OPTIONAL - default: 1) Factor by which the time between each MPC step is multiplied for the animation
+    #         - max_size (bool):      (OPTIONAL - default: False) If True, the map plot will be maximized
+    #         - mpc_output (bool):    (OPTIONAL - default: False) If True, the output of the MPC will be printed in detail in each time step
+    #     '''
 
-        if max_steps == 0:
-            print("WARNING in 'simulate_mpc()': 'max_steps' is 0 - MPC will not be simulated")
-            return
-        if max_steps == 1:
-            print("WARNING in 'simulate_mpc()': 'max_steps' is 1 - everything stays at its initial position")
+    #     if max_steps == 0:
+    #         print("WARNING in 'simulate_mpc()': 'max_steps' is 0 - MPC will not be simulated")
+    #         return
+    #     if max_steps == 1:
+    #         print("WARNING in 'simulate_mpc()': 'max_steps' is 1 - everything stays at its initial position")
 
-        sim_graphics = do_mpc.graphics.Graphics(self.simulator.data)
-        if plot_data:
-            xplot = [self.model.x.keys()[i] for i in range(len(self.model.x.keys())) if i not in self.do_not_plot_ind]
-            if 'default' in self.model.u.keys():
-                names = np.concatenate([xplot, [i for i in self.model.u.keys() if i != 'default']], axis=-1)
-            else:
-                names = np.concatenate([xplot, self.model.u.keys()], axis=-1)
-            xlen = len(self.model.x.keys()) - len(self.do_not_plot_ind)
-            fig, ax = plt.subplots(len(names), sharex=True)
-            for name_ind, name in enumerate(names):
-                ax[name_ind].set_ylabel(name)
-                if name_ind < xlen:
-                    sim_graphics.add_line(var_type='_x', var_name=name, axis=ax[name_ind])
-                else:
-                    sim_graphics.add_line(var_type='_u', var_name=name, axis=ax[name_ind])
+    #     sim_graphics = do_mpc.graphics.Graphics(self._simulator.data)
+    #     if plot_data:
+    #         xplot = [self._model.x.keys()[i] for i in range(len(self._model.x.keys())) if i not in self._do_not_plot_ind]
+    #         if 'default' in self._model.u.keys():
+    #             names = np.concatenate([xplot, [i for i in self._model.u.keys() if i != 'default']], axis=-1)
+    #         else:
+    #             names = np.concatenate([xplot, self._model.u.keys()], axis=-1)
+    #         xlen = len(self._model.x.keys()) - len(self._do_not_plot_ind)
+    #         fig, ax = plt.subplots(len(names), sharex=True)
+    #         for name_ind, name in enumerate(names):
+    #             ax[name_ind].set_ylabel(name)
+    #             if name_ind < xlen:
+    #                 sim_graphics.add_line(var_type='_x', var_name=name, axis=ax[name_ind])
+    #             else:
+    #                 sim_graphics.add_line(var_type='_u', var_name=name, axis=ax[name_ind])
 
-        pos_tol = 0.01 # TODO: Add (default) input instead
-        vel_tol = 0.01 # TODO: Add (default) input instead
-        angle_tol = 0.01 # TODO: Add (default) input instead
-        for i in range(max_steps):
-            # x0_dict = {}
-            # print("Current x: " + str(self.curr_x))
-            x0_dict = {'x': self.curr_x[self.indices['x']], 'y': self.curr_x[self.indices['y']], 'vx': self.curr_x[self.indices['vx']], 'vy': self.curr_x[self.indices['vy']]}
-            # t0 = time.time()
-            x0u0 = self.next_step(x0_dict, pos_tol = pos_tol, vel_tol = vel_tol, angle_tol = angle_tol, suppress_output = suppress_mpc_output)
-            # t1 = time.time()
-            # timevec2.append(t1 - t0)
-            if x0u0 is None:
-                break
-            else:
-                # u0 = x0u0[0]
-                # x0 = x0u0[1]
-                # self.curr_x = x0
-                # print("Current derivative:\t", x0u0[1][self.find_state_index('der_ds')])
-                pass
+    #     pos_tol = 0.01 # TODO: Add (default) input instead
+    #     vel_tol = 0.01 # TODO: Add (default) input instead
+    #     angle_tol = 0.01 # TODO: Add (default) input instead
+    #     for i in range(max_steps):
+    #         # x0_dict = {}
+    #         # print("Current x: " + str(self._curr_x))
+    #         x0_dict = {'x': self._curr_x[self._indices['x']], 'y': self._curr_x[self._indices['y']], 'vx': self._curr_x[self._indices['vx']], 'vy': self._curr_x[self._indices['vy']]}
+    #         # t0 = time.time()
+    #         x0u0 = self.next_step(x0_dict, pos_tol = pos_tol, vel_tol = vel_tol, angle_tol = angle_tol, suppress_output = suppress_mpc_output)
+    #         # t1 = time.time()
+    #         # timevec2.append(t1 - t0)
+    #         if x0u0 is None:
+    #             break
+    #         else:
+    #             # u0 = x0u0[0]
+    #             # x0 = x0u0[1]
+    #             # self._curr_x = x0
+    #             # print("Current derivative:\t", x0u0[1][self.find_state_index('der_ds')])
+    #             pass
 
-        if i == 0 and max_steps > 1:
-            print("The robot is already at the goal position")
-        else:
-            print("Necessary time steps: " + str(i+1))
-            if plot_data:
-                sim_graphics.plot_results()
-                sim_graphics.reset_axes()
-            if plot_map:
-                fig, ax = plt.subplots()
-                ax.set_xlabel('x-Position [m]')
-                ax.set_ylabel('y-Position [m]')
-                if xlim is not None:
-                    ax.set_xlim(xlim)
-                if ylim is not None:
-                    ax.set_ylim(ylim)
-                ax.set_aspect('equal')
+    #     if i == 0 and max_steps > 1:
+    #         print("The robot is already at the goal position")
+    #     else:
+    #         print("Necessary time steps: " + str(i+1))
+    #         if plot_data:
+    #             sim_graphics.plot_results()
+    #             sim_graphics.reset_axes()
+    #         if plot_map:
+    #             fig, ax = plt.subplots()
+    #             ax.set_xlabel('x-Position [m]')
+    #             ax.set_ylabel('y-Position [m]')
+    #             if xlim is not None:
+    #                 ax.set_xlim(xlim)
+    #             if ylim is not None:
+    #                 ax.set_ylim(ylim)
+    #             ax.set_aspect('equal')
 
-                if max_size:
-                    # Get the current figure manager
-                    figManager = plt.get_current_fig_manager()
+    #             if max_size:
+    #                 # Get the current figure manager
+    #                 figManager = plt.get_current_fig_manager()
                     
-                    # Retrieve screen width and height using tkinter
-                    root = tk.Tk()
-                    root.withdraw()
-                    screen_width = root.winfo_screenwidth()
-                    screen_height = root.winfo_screenheight()
+    #                 # Retrieve screen width and height using tkinter
+    #                 root = tk.Tk()
+    #                 root.withdraw()
+    #                 screen_width = root.winfo_screenwidth()
+    #                 screen_height = root.winfo_screenheight()
 
-                    # Resize the window to the screen size
-                    figManager.window.geometry(f"{screen_width}x{screen_height}+0+0")  # Set window size to screen size
+    #                 # Resize the window to the screen size
+    #                 figManager.window.geometry(f"{screen_width}x{screen_height}+0+0")  # Set window size to screen size
 
-                # Goal position
-                if self.indices['goal_x'] is not None and self.indices['goal_y'] is not None:
-                    add_plots = 2
-                elif self.indices['goal_x'] is not None or self.indices['goal_y'] is not None:
-                    raise AssertionError("ERROR in 'simulate_mpc()': Either both or none of the moving reference states must be set - should not happen")
-                else:
-                    ax.plot(self.reference[self.indices['x']], self.reference[self.indices['y']], 'go')
-                    add_plots = 1
+    #             # Goal position
+    #             if self._indices['goal_x'] is not None and self._indices['goal_y'] is not None:
+    #                 add_plots = 2
+    #             elif self._indices['goal_x'] is not None or self._indices['goal_y'] is not None:
+    #                 raise AssertionError("ERROR in 'simulate_mpc()': Either both or none of the moving reference states must be set - should not happen")
+    #             else:
+    #                 ax.plot(self._reference[self._indices['x']], self._reference[self._indices['y']], 'go')
+    #                 add_plots = 1
 
-                # Static obstacles
-                theta = np.linspace(0, 2*np.pi, 100)
-                for obs in self.static_obstacles:
-                    # TODO: Differentiate between circles and poylgons
-                    if isinstance(obs, Circle):
-                        x_obs_plot = obs.center[0] + obs.radius*np.cos(theta)
-                        y_obs_plot = obs.center[1] + obs.radius*np.sin(theta)
-                        ax.plot(x_obs_plot, y_obs_plot, 'k')
-                    elif isinstance(obs, Polygon):
-                        x_obs_plot = [point[0] for point in (obs.points + obs.points[0:1])]
-                        y_obs_plot = [point[1] for point in (obs.points + obs.points[0:1])]
-                        ax.plot(x_obs_plot, y_obs_plot, 'k')
+    #             # Static obstacles
+    #             theta = np.linspace(0, 2*np.pi, 100)
+    #             for obs in self._static_obstacles:
+    #                 # TODO: Differentiate between circles and poylgons
+    #                 if isinstance(obs, Circle):
+    #                     x_obs_plot = obs.center[0] + obs.radius*np.cos(theta)
+    #                     y_obs_plot = obs.center[1] + obs.radius*np.sin(theta)
+    #                     ax.plot(x_obs_plot, y_obs_plot, 'k')
+    #                 elif isinstance(obs, Polygon):
+    #                     x_obs_plot = [point[0] for point in (obs.points + obs.points[0:1])]
+    #                     y_obs_plot = [point[1] for point in (obs.points + obs.points[0:1])]
+    #                     ax.plot(x_obs_plot, y_obs_plot, 'k')
 
-                moving_plot = [ax.plot([], [], markersize=5)[0] for _ in range(len(self.sat_radii)+add_plots)]
+    #             moving_plot = [ax.plot([], [], markersize=5)[0] for _ in range(len(self._sat_radii)+add_plots)]
                 
-                # Animate map: robot position over time, satellite (as circle) positions over time # TODO: Modify when adding goal posiiton over time
-                timevec = np.arange(0, len(self.simulator.data['_x', 'x'])*self.ts, self.ts)
-                for i in range(len(timevec)):
-                    ax.plot(self.simulator.data['_x', 'x'][i], self.simulator.data['_x', 'y'][i],  'b+', markersize=5)
-                    x_robot = self.simulator.data['_x', 'x'][i] + self.r_robot*np.cos(theta)
-                    y_robot = self.simulator.data['_x', 'y'][i] + self.r_robot*np.sin(theta)
-                    moving_plot[0].set_data(x_robot, y_robot)
+    #             # Animate map: robot position over time, satellite (as circle) positions over time # TODO: Modify when adding goal posiiton over time
+    #             timevec = np.arange(0, len(self._simulator.data['_x', 'x'])*self.ts, self.ts)
+    #             for i in range(len(timevec)):
+    #                 ax.plot(self._simulator.data['_x', 'x'][i], self._simulator.data['_x', 'y'][i],  'b+', markersize=5)
+    #                 x_robot = self._simulator.data['_x', 'x'][i] + self.r_robot*np.cos(theta)
+    #                 y_robot = self._simulator.data['_x', 'y'][i] + self.r_robot*np.sin(theta)
+    #                 moving_plot[0].set_data(x_robot, y_robot)
 
-                    if add_plots == 2:
-                        x_goal = self.simulator.data['_x', 'goal_x'][i] + self.r_robot*np.cos(theta)
-                        y_goal = self.simulator.data['_x', 'goal_y'][i] + self.r_robot*np.sin(theta)
-                        moving_plot[1].set_data(x_goal, y_goal)
+    #                 if add_plots == 2:
+    #                     x_goal = self._simulator.data['_x', 'goal_x'][i] + self.r_robot*np.cos(theta)
+    #                     y_goal = self._simulator.data['_x', 'goal_y'][i] + self.r_robot*np.sin(theta)
+    #                     moving_plot[1].set_data(x_goal, y_goal)
 
-                    for sat_ind, sat_rad in enumerate(self.sat_radii):
-                        x_obs_plot = self.simulator.data['_x', f'sat_x{sat_ind+1}'][i] + sat_rad*np.cos(theta)
-                        y_obs_plot = self.simulator.data['_x', f'sat_y{sat_ind+1}'][i] + sat_rad*np.sin(theta)
-                        moving_plot[sat_ind + add_plots].set_data(x_obs_plot, y_obs_plot)
-                    plt.pause(self.ts/time_factor)
+    #                 for sat_ind, sat_rad in enumerate(self._sat_radii):
+    #                     x_obs_plot = self._simulator.data['_x', f'sat_x{sat_ind+1}'][i] + sat_rad*np.cos(theta)
+    #                     y_obs_plot = self._simulator.data['_x', f'sat_y{sat_ind+1}'][i] + sat_rad*np.sin(theta)
+    #                     moving_plot[sat_ind + add_plots].set_data(x_obs_plot, y_obs_plot)
+    #                 plt.pause(self.ts/time_factor)
                 
-                plt.show()
+    #             plt.show()
 
 if __name__ == '__main__':
     x_goal = 10

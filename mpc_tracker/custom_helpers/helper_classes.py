@@ -6,6 +6,7 @@ from shapely import Polygon as ShapelyPolygon
 # Helper class for a circle
 @dataclass
 class Circle:
+    # Public attributes
     center: np.ndarray = field()
     radius: float = field()
 
@@ -38,14 +39,14 @@ class Polygon:
     """
     Helper class for a polygon. The polygon is defined by a list of points, each connecting to the next point in the list (wrapping around of last-first).
     """
+    # Public attributes
     points: List[np.ndarray] = field()
+
+    # Private attributes
     _center: np.ndarray = field(init=False)
-    _set_equations: List = field(init=False, default_factory=list)  # Initialize each instance with its own list
+    _set_equations: List[str] = field(init=False, default_factory=list)  # Initialize each instance with its own list
 
     def __post_init__(self):
-        # Reset "_set_equations"
-        self._set_equations = []
-
         # Ensure that points is a list of numpy arrays
         if not (isinstance(self.points, list) or isinstance(self.points, tuple)):
             raise TypeError(f"Expected 'points' to be a list or tuple, but got '{type(self.points).__name__}' instead.")
@@ -101,7 +102,7 @@ class Polygon:
         """
         N = len(self.points)
         p1, p2, p3 = self.points[0], self.points[1], self.points[2]
-        direction = np.cross(p2 - p1, p3 - p2)  # z-component of cross product
+        direction = np.cross(p2 - p1, p3 - p2) # z-component of cross product
         for i in range(len(self.points) - 1):
             p1, p2, p3 = self.points[i + 1], self.points[(i + 2) % N], self.points[(i + 3) % N]
             if direction*np.cross(p2 - p1, p3 - p2) < 0:
@@ -110,7 +111,9 @@ class Polygon:
         return True
             
 if __name__ == "__main__":
-    # s1 = Polygon([(0, 0), (0.5, 0), (1, 0), (1, 0.5), (1, 1), (0, 1)])
-    # s2 = Polygon([(0, 0), (0, 1), (1, 1), (1, 0)])
-    s3 = Polygon([(0, 1), (1, 0), (0, -1), (-1, 0)])
+    s1 = Polygon([(0, 0), (0.5, 0), (1, 0), (1, 0.5), (1, 1), (0, 1)])
+    s2 = Polygon([(0, 0), (0, 1), (1, 1), (1, 0)])
+    print(s1._set_equations)
+    print(s2._set_equations)
+    # s3 = Polygon([(0, 1), (1, 0), (0, -1), (-1, 0)])
     pass
