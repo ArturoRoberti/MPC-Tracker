@@ -47,9 +47,11 @@ class Polygon:
     _set_equations: List[str] = field(init=False, default_factory=list)  # Initialize each instance with its own list
 
     def __post_init__(self):
-        # Ensure that points is a list of numpy arrays
-        if not (isinstance(self.points, list) or isinstance(self.points, tuple)):
-            raise TypeError(f"Expected 'points' to be a list or tuple, but got '{type(self.points).__name__}' instead.")
+        # Ensure that points is a list (of numpy arrays)
+        if not (isinstance(self.points, list) or isinstance(self.points, tuple) or isinstance(self.points, np.ndarray)):
+            raise TypeError(f"Expected 'points' to be a list, tuple or np.ndarray, but got '{type(self.points).__name__}' instead.")
+        elif isinstance(self.points, np.ndarray):
+            self.points = list(self.points)
         elif isinstance(self.points, tuple):
             self.points = list(self.points)
         
@@ -111,8 +113,10 @@ class Polygon:
         return True
             
 if __name__ == "__main__":
-    s1 = Polygon([(0, 0), (0.5, 0), (1, 0), (1, 0.5), (1, 1), (0, 1)])
+    s1 = Polygon(np.array([(0, 0), (0.5, 0), (1, 0), (1, 0.5), (1, 1), (0, 1)]))
     s2 = Polygon([(0, 0), (0, 1), (1, 1), (1, 0)])
+    c1 = Circle(np.array([0, 0]), 1)
+    c2 = Circle([0, 0], 1)
     print(s1._set_equations)
     print(s2._set_equations)
     # s3 = Polygon([(0, 1), (1, 0), (0, -1), (-1, 0)])

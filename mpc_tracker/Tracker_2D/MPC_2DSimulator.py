@@ -28,8 +28,8 @@ class MPC_2DSimulator:
                                     # TODO: add noise to controls as well # TODO in general
         - xlim (tuple):             (OPTIONAL - default: None) Tuple of two floats (xmin, xmax) for the x-axis limits of the map plot
         - ylim (tuple):             (OPTIONAL - default: None) Tuple of two floats (ymin, ymax) for the y-axis limits of the map plot
-        - time_factor (float):      (OPTIONAL - default: 1) Factor by which the time between each MPC step is multiplied for the animation
-        - max_size (bool):          (OPTIONAL - default: False) If True, the map plot will be maximized
+        - simulation_time_factor (float):      (OPTIONAL - default: 1) Factor by which the time between each MPC step is multiplied for the animation
+        - max_plotwindows (bool):          (OPTIONAL - default: False) If True, the map plot will be maximized
         - mpc_output (bool):        (OPTIONAL - default: False) If True, the output of the MPC will be printed in detail in each time step
     '''
 
@@ -42,21 +42,20 @@ class MPC_2DSimulator:
 
     ## Optional inputs
     max_steps:              float                   = field(default=1000)
-    # plot_data_bool:              bool            = field(default=False)
-    # plot_map_bool:               bool            = field(default=True)
-    noise:                  Tuple                   = field(default=(0, 0, 0))
+    noise:                  Tuple                   = field(default=(0, 0, 0)) # TODO (also, implement as vectors/matrices)
     xlim:                   Tuple                   = field(default=None)
     ylim:                   Tuple                   = field(default=None)
-    time_factor:            float                   = field(default=1)
-    max_size:               bool                    = field(default=False)
-    suppress_mpc_output:    bool                    = field(default=True)
-    output_time:            bool                    = field(default=False)
-    pos_tol:                float                   = field(default=0.01)
-    vel_tol:                float                   = field(default=0.01)
-    angle_tol:              float                   = field(default=0.01)
-    data:                   Dict[str, np.ndarray]   = field(init=False)
+    simulation_time_factor: float                   = field(default=1)
+    maximize_plotwindows:   bool                    = field(default=False)
+    suppress_dompc_output:  bool                    = field(default=True)
+    output_timespecs:       bool                    = field(default=False)
+    goal_pos_tol:           float                   = field(default=0.01)
+    goal_vel_tol:           float                   = field(default=0.01)
+    goal_angle_tol:         float                   = field(default=0.01)
+    data:                   Dict[str, np.ndarray]   = field(init=False)         # Contains the states, inputs and time of the simulation (can be accessed after calling 'run_mpc()')
 
     # Private attributes
+    _mpc_ran:               bool                        = field(init=False, default=False)
     _deltatimevec:          List                        = field(init=False, default_factory=list)
     _sim_graphics:          do_mpc.graphics.Graphics    = field(init=False, default=None)
 
@@ -68,21 +67,26 @@ class MPC_2DSimulator:
             - None
 
         Outputs:
-            - np.ndarray: Array of the states, inputs and time of the simulation
+            - data (np.ndarray):    Dictionary containing the states, inputs and time of the simulation. This can also be accessed via the 'data' attribute after calling this function.
         '''
         if self.max_steps == 0:
             print("WARNING in 'simulate_mpc()': 'max_steps' is 0 - MPC will not be simulated and 'None' will be returned")
             return None
         
+        if self._mpc_ran:
+            print(colored("WARNING in 'simulate_mpc()': MPC has already been simulated - running it again will overwrite the previous simulation", 'red'))
+        else:
+            self._mpc_ran = True
+
         for i in range(self.max_steps):
             x0_dict = {'x': self.tracker._curr_x[self.tracker._indices['x']], 'y': self.tracker._curr_x[self.tracker._indices['y']], 'vx': self.tracker._curr_x[self.tracker._indices['vx']], 'vy': self.tracker._curr_x[self.tracker._indices['vy']]}
 
-            if self.output_time:
+            if self.output_timespecs:
                 t0 = time.time()
 
-            x0u0 = self.tracker.next_step(x0_dict, pos_tol = self.pos_tol, vel_tol = self.vel_tol, angle_tol = self.angle_tol, suppress_output = self.suppress_mpc_output)
+            x0u0 = self.tracker.next_step(x0_dict, pos_tol = self.goal_pos_tol, vel_tol = self.goal_vel_tol, angle_tol = self.goal_angle_tol, suppress_output = self.suppress_dompc_output)
             
-            if self.output_time:
+            if self.output_timespecs:
                 t1 = time.time()
                 self._deltatimevec.append(t1 - t0)
             
@@ -94,7 +98,7 @@ class MPC_2DSimulator:
         else:
             print("Necessary time steps: " + str(i+1))
 
-        if self.output_time:
+        if self.output_timespecs:
             print("Average time per MPC step: \t\t\t" + str(np.mean(self._deltatimevec)))
             print("Standard deviation of time per MPC step: \t" + str(np.std(self._deltatimevec)))
             print("Maximal time per MPC step: \t\t\t" + str(np.max(self._deltatimevec)))
@@ -112,12 +116,22 @@ class MPC_2DSimulator:
 
         self.data = result_statedict | result_controldict | result_timedict
         return self.data # TODO: Add possibility to also return distances to obstacles
-
-        return result_statedict | result_controldict | result_timedict # TODO: Add possibility to also return distances to obstacles
-
         
-
     def plot_data(self, block: bool=False) -> None:
+        '''
+        This function plots the data of the simulation (states and inputs).
+
+        Inputs:
+            - block (bool): (OPTIONAL - default: False) If True, the plot will block the rest of the code until closed. Note that if 'block' is False, the plot will not be shown unless 'plt.show()' is called sometime after this function.
+
+        Outputs:
+            - None
+        '''
+
+        if not self._mpc_ran:
+            print(colored("ERROR", "red") + " in 'plot_data()': MPC has not been simulated yet - call 'run_mpc()' first")
+            return
+        
         self._sim_graphics = do_mpc.graphics.Graphics(self.tracker._simulator.data)
 
         xplot = [self.tracker._model.x.keys()[i] for i in range(len(self.tracker._model.x.keys())) if i not in self.tracker._do_not_plot_ind]
@@ -135,7 +149,7 @@ class MPC_2DSimulator:
             else:
                 self._sim_graphics.add_line(var_type='_u', var_name=name, axis=ax_data[name_ind])
 
-        if self.max_size:
+        if self.maximize_plotwindows:
             # Get the current figure manager
             figManager = plt.get_current_fig_manager()
             
@@ -171,6 +185,11 @@ class MPC_2DSimulator:
         Outputs:
             - None
         '''
+
+        if not self._mpc_ran:
+            print(colored("ERROR", "red") + " in 'plot_map()': MPC has not been simulated yet - call 'run_mpc()' first")
+            return
+        
         fig_map, ax_map = plt.subplots()
         ax_map.set_xlabel('x-Position [m]')
         ax_map.set_ylabel('y-Position [m]')
@@ -181,7 +200,7 @@ class MPC_2DSimulator:
         ax_map.set_aspect('equal')
         fig_map.canvas.manager.set_window_title("Simulation Map")
 
-        if self.max_size:
+        if self.maximize_plotwindows:
             # Get the current figure manager
             figManager = plt.get_current_fig_manager()
             
@@ -240,7 +259,7 @@ class MPC_2DSimulator:
             plt.draw()              # Draw the updated line
             plt.show(block=False)   # Show the plot
             fig_map.canvas.flush_events()
-            time.sleep(self.tracker.ts/self.time_factor)
+            time.sleep(self.tracker.ts/self.simulation_time_factor)
             if not plt.fignum_exists(fig_map.number):
                 break
 
@@ -250,173 +269,6 @@ class MPC_2DSimulator:
             plt.draw()
             plt.show(block=False)
             fig_map.canvas.flush_events()
-
-    # def simulate(self) -> np.ndarray:
-    #         fig_map, ax_map = plt.subplots()
-    #         ax_map.set_xlabel('x-Position [m]')
-    #         ax_map.set_ylabel('y-Position [m]')
-    #         if self.xlim is not None:
-    #             ax_map.set_xlim(self.xlim)
-    #         if self.ylim is not None:
-    #             ax_map.set_ylim(self.ylim)
-    #         ax_map.set_aspect('equal')
-    #         fig_map.canvas.manager.set_window_title("Simulation Map")
-
-    #         if self.max_size:
-    #             # Get the current figure manager
-    #             figManager = plt.get_current_fig_manager()
-                
-    #             # Retrieve screen width and height using tkinter
-    #             root = tk.Tk()
-    #             root.withdraw()
-    #             screen_width = root.winfo_screenwidth()
-    #             screen_height = root.winfo_screenheight()
-
-    #             # Resize the window to the screen size
-    #             figManager.window.geometry(f"{screen_width}x{screen_height}+0+0")  # Set window size to screen size
-
-    #         # Goal position
-    #         if self.tracker._indices['goal_x'] is not None and self.tracker._indices['goal_y'] is not None:
-    #             add_plots = 2
-    #         elif self.tracker._indices['goal_x'] is not None or self.tracker._indices['goal_y'] is not None:
-    #             raise AssertionError("ERROR in 'simulate_mpc()': Either both or none of the moving reference states must be set - should not happen")
-    #         else:
-    #             ax_map.plot(self.tracker._reference[self.tracker._indices['x']], self.tracker._reference[self.tracker._indices['y']], 'go')
-    #             add_plots = 1
-
-    #         # Static obstacles
-    #         theta = np.linspace(0, 2*np.pi, 100)
-    #         for obs in self.tracker._static_obstacles:
-    #             # TODO: Differentiate between circles and poylgons
-    #             if isinstance(obs, Circle):
-    #                 x_obs_plot = obs.center[0] + obs.radius*np.cos(theta)
-    #                 y_obs_plot = obs.center[1] + obs.radius*np.sin(theta)
-    #                 ax_map.plot(x_obs_plot, y_obs_plot, 'k')
-    #             elif isinstance(obs, Polygon):
-    #                 x_obs_plot = [point[0] for point in (obs.points + obs.points[0:1])]
-    #                 y_obs_plot = [point[1] for point in (obs.points + obs.points[0:1])]
-    #                 # ax_map.fill(x_obs_plot, y_obs_plot, 'k')
-    #                 ax_map.plot(x_obs_plot, y_obs_plot, 'k')
-
-    #         moving_plot = [ax_map.plot([], [], markersize=5)[0] for _ in range(len(self.tracker._sat_radii)+add_plots)]
-            
-    #         # Animate map: robot position over time, satellite (as circle) positions over time # TODO: Modify when adding goal posiiton over time
-    #         timevec = np.arange(0, len(self.tracker._simulator.data['_x', 'x']), 1)
-    #         for i in range(len(timevec)):
-    #             ax_map.plot(self.tracker._simulator.data['_x', 'x'][i], self.tracker._simulator.data['_x', 'y'][i],  'b+', markersize=5)
-    #             x_robot = self.tracker._simulator.data['_x', 'x'][i] + self.tracker.r_robot*np.cos(theta)
-    #             y_robot = self.tracker._simulator.data['_x', 'y'][i] + self.tracker.r_robot*np.sin(theta)
-    #             moving_plot[0].set_data(x_robot, y_robot)
-
-    #             if add_plots == 2:
-    #                 x_goal = self.tracker._simulator.data['_x', 'goal_x'][i] + self.tracker.r_robot*np.cos(theta)
-    #                 y_goal = self.tracker._simulator.data['_x', 'goal_y'][i] + self.tracker.r_robot*np.sin(theta)
-    #                 moving_plot[1].set_data(x_goal, y_goal)
-
-    #             for sat_ind, sat_rad in enumerate(self.tracker._sat_radii):
-    #                 x_obs_plot = self.tracker._simulator.data['_x', f'sat_x{sat_ind+1}'][i] + sat_rad*np.cos(theta)
-    #                 y_obs_plot = self.tracker._simulator.data['_x', f'sat_y{sat_ind+1}'][i] + sat_rad*np.sin(theta)
-    #                 moving_plot[sat_ind + add_plots].set_data(x_obs_plot, y_obs_plot)
-
-    #             plt.draw()              # Draw the updated line
-    #             plt.show(block=False)   # Show the plot
-    #             fig_map.canvas.flush_events()
-    #             time.sleep(self.tracker.ts/self.time_factor)
-    #             if not plt.fignum_exists(fig_map.number):
-    #                 break
-        
-    #     def _plot_data(self) -> None:
-    #         xplot = [self.tracker._model.x.keys()[i] for i in range(len(self.tracker._model.x.keys())) if i not in self.tracker._do_not_plot_ind]
-    #         if 'default' in self.tracker._model.u.keys():
-    #             names = np.concatenate([xplot, [i for i in self.tracker._model.u.keys() if i != 'default']], axis=-1)
-    #         else:
-    #             names = np.concatenate([xplot, self.tracker._model.u.keys()], axis=-1)
-    #         xlen = len(self.tracker._model.x.keys()) - len(self.tracker._do_not_plot_ind)
-    #         fig_data, ax_data = plt.subplots(len(names), sharex=True)
-    #         if self.max_size:
-    #             # Get the current figure manager
-    #             figManager = plt.get_current_fig_manager()
-                
-    #             # Retrieve screen width and height using tkinter
-    #             root = tk.Tk()
-    #             root.withdraw()
-    #             screen_width = root.winfo_screenwidth()
-    #             screen_height = root.winfo_screenheight()
-
-    #             # Resize the window to the screen size
-    #             figManager.window.geometry(f"{screen_width}x{screen_height}+0+0")  # Set window size to screen size
-
-    #             # Set window title
-    #             fig_data.canvas.manager.set_window_title("Simulation Data")
-    #         for name_ind, name in enumerate(names):
-    #             ax_data[name_ind].set_ylabel(name)
-    #             if name_ind < xlen:
-    #                 sim_graphics.add_line(var_type='_x', var_name=name, axis=ax_data[name_ind])
-    #             else:
-    #                 sim_graphics.add_line(var_type='_u', var_name=name, axis=ax_data[name_ind])
-
-    #         sim_graphics.plot_results()
-    #         sim_graphics.reset_axes()
-        
-    #     if self.max_steps == 0:
-    #         print("WARNING in 'simulate_mpc()': 'max_steps' is 0 - MPC will not be simulated and 'None' will be returned")
-    #         return None # TODO: Return initial state instead of None
-    #     if not(self.plot_data or self.plot_map):
-    #         print("WARNING in 'simulate_mpc()': No output is set - Neither a map nor data will be plotted")
-
-    #     pos_tol = 0.01 # TODO: Add (default) input instead
-    #     vel_tol = 0.01 # TODO: Add (default) input instead
-    #     angle_tol = 0.01 # TODO: Add (default) input instead
-    #     for i in range(self.max_steps):
-    #         x0_dict = {'x': self.tracker._curr_x[self.tracker._indices['x']], 'y': self.tracker._curr_x[self.tracker._indices['y']], 'vx': self.tracker._curr_x[self.tracker._indices['vx']], 'vy': self.tracker._curr_x[self.tracker._indices['vy']]}
-    #         if self.output_time:
-    #             t0 = time.time()
-    #         x0u0 = self.tracker.next_step(x0_dict, pos_tol = pos_tol, vel_tol = vel_tol, angle_tol = angle_tol, suppress_output = self.suppress_mpc_output)
-    #         # if x0u0 is not None:
-    #         #     x, y = x0u0[0][self.tracker._indices['x']], x0u0[0][self.tracker._indices['y']]
-    #             # print(colored(f"Step {i+1}: x = {x}, y = {y}", 'green'))
-    #             # nlc = -max(17.2 - (1*x + 1*y),max(5.2 - (-1*x + 1*y),max(-14.8 - (-1*x + -1*y),-3 - (1*x + -1*y))))
-    #             # print("Current last nonlinear constraint:", nlc)
-    #             # if nlc > 0:
-    #             #     print(colored("WARNING: Nonlinear constraint is positive", 'red'))
-    #             # -fmax(17.2 - (1*x + 1*y),fmax(5.2 - (-1*x + 1*y),fmax(-14.8 - (-1*x + -1*y),-3 - (1*x + -1*y))))
-    #         if self.output_time:
-    #             t1 = time.time()
-    #             self._deltatimevec.append(t1 - t0)
-    #             # print("Time for MPC step " + str(i+1) + ": " + str(t1 - t0) + " s")
-    #         if x0u0 is None:
-    #             break
-
-    #     if i == 0:
-    #         print("The robot is already at the goal position")
-    #     else:
-    #         print("Necessary time steps: " + str(i+1))
-    #         if self.plot_map_bool:
-    #             _plot_map()
-
-    #         sim_graphics = do_mpc.graphics.Graphics(self.tracker._simulator.data)
-    #         if self.plot_data_bool:
-    #             _plot_data()
-
-    #         plt.show()
-
-    #     if self.output_time:
-    #         print("Average time per MPC step: \t\t\t" + str(np.mean(self._deltatimevec)))
-    #         print("Standard deviation of time per MPC step: \t" + str(np.std(self._deltatimevec)))
-    #         print("Maximal time per MPC step: \t\t\t" + str(np.max(self._deltatimevec)))
-    #         print("Minimal time per MPC step: \t\t\t" + str(np.min(self._deltatimevec)))
-
-    #     result_statedict = {}
-    #     for key in self.tracker._indices.keys():
-    #         result_statedict[key] = self.tracker._simulator.data['_x'][:, self.tracker._indices[key]]
-
-    #     result_controldict = {}
-    #     for ind, control in enumerate([i.name() for i in self.tracker._controls]):
-    #         result_controldict[control] = self.tracker._simulator.data['_u'][:, ind]
-
-    #     result_timedict = {'t': self.tracker._simulator.data['_time'].reshape((len(self.tracker._simulator.data['_time']), ))}
-    #     # self._sim_graphics = sim_graphics
-    #     return result_statedict | result_controldict | result_timedict # TODO: Add possibility to also return distances to obstacles
 
 if __name__ == '__main__':
     x_goal = 10
@@ -477,19 +329,7 @@ if __name__ == '__main__':
     model.set_horizon(horizon_length=5)
 
     # simulator = MPC_2DSimulator(model, max_steps=500, plot_data_bool=False, plot_map_bool=False, time_factor=10, max_size=True, output_time=True)
-    simulator = MPC_2DSimulator(model, max_steps=500, time_factor=10, max_size=True, output_time=True)
-
-    simulator.max_steps = 100
-    # print(simulator.run_mpc())
+    simulator = MPC_2DSimulator(model, max_steps=500, simulation_time_factor=10, maximize_plotwindows=True, output_timespecs=True)
     data = simulator.run_mpc()
-    simulator.plot_data(block=True)
     simulator.plot_map(block=True)
-    # print(simulator.tracker._simulator.data)
-    # print(colored("Data from simulator:", 'red'))
-    # print(simulator._sim_graphics.data)
-    # simulator.plot_data()
-    # simulator.max_size = False
-    # simulator.plot_data()
-
-    plt.show()
-    # print(data)
+    simulator.plot_data(block=True)
